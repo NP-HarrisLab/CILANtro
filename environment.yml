@@ -1,0 +1,17 @@
+name: cilantro
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - flask
+  - isort
+  - black
+  - numpy
+  - marshmallow
+  - pip:
+    - pynwb
+    - neuroconv
+    - simple-websocket
+    - spikeinterface
+prefix: /opt/homebrew/Caskroom/miniconda/base/envs/cilantro
