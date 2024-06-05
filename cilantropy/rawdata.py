@@ -10,6 +10,10 @@ class RawData(object):
         self.data = np.memmap(self.bin_path, dtype="int16", mode="r")
         self.data = np.reshape(self.data, (-1, self.n_channels))
 
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self.data.shape
+
     def _get_num_channels(self) -> int:
         """Get the number of channels from the meta file."""
         with open(self.meta_path, "r") as f:
