@@ -52,7 +52,7 @@ class CuratorParams(Schema):
     max_spikes = fields.Int(
         required=False,
         missing=1000,
-        description="Maximum number of spikes per cluster used to calculate mean waveforms and cross projections. -1 uses all spikes.",
+        description="Maximum number of spikes per cluster used to calculate mean waveforms. -1 uses all spikes.",
     )
     # simularity_type = fields.Str(
     #     required=False,
@@ -86,21 +86,69 @@ class Curator(object):
     Class for curating spike sorted data.
 
     Attributes:
+        ks_folder: str
+            Path to the kilosort folder.
+        params: dict
+            Parameters for the curation.
+        raw_data: RawData
+            Raw data.
         cluster_groups: pd.DataFrame
             Cluster groups.
         cluster_metrics: pd.DataFrame
             Cluster metrics.
         spike_clusters: np.ndarray
             cluster_id for each spike. Shape (n_spikes,)
-
-        ---
+        spike_times: np.ndarray
+            Spike times. Shape (n_spikes,)
+        channel_positions: np.ndarray
+            Channel positions. Shape (n_channels, 2)
+        spike_templates: np.ndarray
+            template_id for each spike. Shape (n_spikes,)
+        similar_templates: np.ndarray
+            Similarity matrix of templates. Shape (n_templates, n_templates)
+        n_templates: int
+            Number of templates.
         mean_wf: np.ndarray
             Mean waveforms for each cluster. Shape (n_clusters_orig, n_channels, pre_samples + post_samples)
-
+        cluster_ids: list
+            Cluster IDs. Length: n_clusters.
+        counts: dict
+            Number of spikes in each cluster.
+        cl_times: list
+            Spike times for each cluster. Length: n_clusters.
+        cl_inds: list
+            Spike indices for each cluster. Length: n_clusters.
+        spikes: dict
+            Spike data for each cluster. {cluster_id: [spike_data]}
+        cluster_template_similarity: np.ndarray
+            Template similarity matrix. Shape (n_clusters, n_clusters)
+        cluster_templates: dict
+            Template counts for each cluster. {cluster_id: [template_ids]}
     """
 
-    def __init__(self, ks_folder: str) -> None:
+    def __init__(self, ks_folder: str, params: dict = {}) -> None:
         self.ks_folder = ks_folder
+
+        # type hinting for attributes
+        self.params: dict = params
+        self.raw_data: RawData = None
+        self.cluster_groups: pd.DataFrame = None
+        self.cluster_metrics: pd.DataFrame = None
+        self.spike_clusters: np.ndarray = None
+        self.spike_times: np.ndarray = None
+        self.channel_positions: np.ndarray = None
+        self.spike_templates: np.ndarray = None
+        self.similar_templates: np.ndarray = None
+        self.mean_wf: np.ndarray = None
+        self.cluster_ids: list = []
+        self.counts: dict = {}
+        self.cl_times: list = []
+        self.cl_inds: list = []
+        self.spikes: dict = {}
+        self.cluster_template_similarity: np.ndarray = None
+        self.cluster_templates: dict = {}
+
+        # load data and initialize attributes
         self._load_params()
         self._load_ks_files()
         self._initialize()
@@ -108,6 +156,10 @@ class Curator(object):
     @property
     def n_clusters(self):
         return len(self.cluster_ids)
+
+    @property
+    def n_templates(self):
+        return self.similar_templates.shape[0]
 
     def get_new_id(self):
         return max(self.cluster_ids) + 1
@@ -163,9 +215,27 @@ class Curator(object):
         """
         new_id = self.get_new_id()
 
+        # update cluster_ids
+        [self.cluster_ids.remove(id) for id in cluster_ids]
+        self.cluster_ids.append(new_id)
+
+        # update cluster_groups
+        groups = self.cluster_groups[
+            self.cluster_groups["cluster_id"].isin(cluster_ids)
+        ]
+        mode = groups["group"].mode().values[0]
+        new_row = pd.DataFrame({"cluster_id": [new_id], "group": [mode]})
+        self.cluster_groups = pd.concat(
+            [self.cluster_groups, new_row], ignore_index=True
+        )
+        # remove old cluster from cluster_groups
+        self.cluster_groups = self.cluster_groups[
+            ~self.cluster_groups["cluster_id"].isin(cluster_ids)
+        ]
+
         # update spike_clusters
-        for i in range(len(cluster_ids)):
-            for ind in self.cl_inds[cluster_ids[i]]:
+        for id in cluster_ids:
+            for ind in self.cl_inds[id]:
                 self.spike_clusters[ind] = new_id
 
         # update cl_times
@@ -198,45 +268,25 @@ class Curator(object):
             (self.mean_wf, np.expand_dims(temp, axis=0)), axis=0
         )
 
+        # update counts
+        self.counts[new_id] = sum([self.counts[i] for i in cluster_ids])
+        [self.counts.pop(id) for id in cluster_ids]
+
         # expand sim arrays
-        self.cluster_template_similarity = np.concatenate(
-            (self.cluster_template_similarity, -1 * np.ones((1, self.n_clusters))),
-            axis=0,
-        )
-        self.cluster_autoencoder_similarity = np.concatenate(
-            (self.cluster_autoencoder_similarity, -1 * np.ones((1, self.n_clusters))),
-            axis=0,
-        )
-
-        # AI Gen code for merging clusters
-        # self.cluster_ids = np.append(self.cluster_ids, new_id)
-        # self.counts[new_id] = 0
-        # self.counts[new_id] = sum([self.counts[i] for i in cluster_ids])
-
-        # # update spike_clusters
-        # for i in cluster_ids:
-        #     self.spike_clusters[self.spike_clusters == i] = new_id
-
-        # # update cluster_metrics
-        # new_metrics = self.cluster_metrics.loc[
-        #     self.cluster_metrics["cluster_id"].isin(cluster_ids)
-        # ].mean()
-        # new_metrics["cluster_id"] = new_id
-        # self.cluster_metrics = self.cluster_metrics.append(
-        #     new_metrics, ignore_index=True
+        # TODO this seems is because now old clusters are still compared to the old and not new merged clusters... should we keep the old clusters then?
+        # self.cluster_template_similarity = np.concatenate(
+        #     (self.cluster_template_similarity, -1 * np.ones((1, self.n_clusters))),
+        #     axis=0,
         # )
 
-        # # update mean_wf
-        # self.mean_wf[new_id, :, :] = np.mean(self.mean_wf[cluster_ids, :, :], axis=0)
-
-        # # update template_counts
-        # self.template_counts[new_id] = np.concatenate(
-        #     [self.template_counts[i] for i in cluster_ids]
-        # )
+        # TODO update cluster_metrics
         logger.info(f"Merged clusters {cluster_ids} into {new_id}.")
         return new_id
 
-    def _load_params(self):
+    def _load_params(self) -> None:
+        """
+        Load data from the params.py file in the kilosort folder.
+        """
         params = {"ks_folder": self.ks_folder}
 
         # load params from params.py
@@ -255,10 +305,10 @@ class Curator(object):
                 os.path.join(self.ks_folder, params["data_path"])
             )
         params["n_channels"] = params.pop("n_channels_dat")
-
+        params.update(self.params)
         self.params = CuratorParams().load(params)
 
-    def _load_ks_files(self):
+    def _load_ks_files(self) -> None:
         """
         load kilosort files and raw data.
             * spike_times.npy
@@ -300,14 +350,27 @@ class Curator(object):
         self.similar_templates = np.load(
             os.path.join(self.ks_folder, "similar_templates.npy")
         )
-        self.n_templates = self.similar_templates.shape[0]
-
         self.raw_data = RawData(self.params["data_path"], self.params["n_channels"])
 
-    def _initialize(self):
+    def _initialize(self) -> None:
+        """
+        Calculate necessary data.
+
+        Sets attributes:
+            - cluster_ids
+            - counts
+            - cl_times
+            - cl_inds
+            - spikes
+            - mean_wf
+            - cluster_metrics
+            - cluster_template_similarity
+            - cluster_templates
+        """
         self.cluster_ids, self.counts = np.unique(
             self.spike_clusters, return_counts=True
         )
+        self.cluster_ids = self.cluster_ids.tolist()
         self.counts = dict(zip(self.cluster_ids, self.counts))
         self.cl_times, self.cl_inds = find_times_multi(
             self.spike_times,
@@ -320,11 +383,7 @@ class Curator(object):
         )  # TODO this is expensive, can we not recalculate every time?
         self.mean_wf = self._calc_mean_wf()
         self.cluster_metrics = self._load_cluster_metrics()
-
         self.cluster_template_similarity = -1 * np.ones(
-            (self.n_clusters, self.n_clusters)
-        )
-        self.cluster_autoencoder_similarity = -1 * np.ones(
             (self.n_clusters, self.n_clusters)
         )
         self.cluster_templates = self._calc_template_counts()
@@ -358,6 +417,7 @@ class Curator(object):
 
         return mean_wf
 
+    # TODO: best way to store cilantro info about individual recordings
     def _load_cluster_metrics(self) -> pd.DataFrame:
         """
         Load the cluster metrics from the cluster metrics files.
@@ -414,8 +474,8 @@ class Curator(object):
             metrics["cluster_id"].map(self.counts).fillna(metrics["n_spikes"])
         )
 
-        # Add label_reason column and set to NA
-        metrics["label_reason"] = pd.NA  # TODO or empty string better?
+        # Add label_reason column and set to empty string
+        metrics["label_reason"] = ""
 
         # rename template peak channel and save waveform peak channel
         if "ch" in metrics.columns:
@@ -440,7 +500,7 @@ class Curator(object):
             metrics.rename(columns={"group": "label"}, inplace=True)
 
         # save metrics to file
-        # metrics.to_csv(metrics_path, sep="\t", index=False)
+        metrics.to_csv(metrics_path, sep="\t", index=False)
         return metrics
 
     def _calc_template_counts(self) -> dict[int, np.ndarray]:
@@ -460,13 +520,11 @@ class Curator(object):
 
         return template_counts
 
-    def _load_spikes(self):
+    def _load_spikes(self) -> dict[int, np.ndarray]:
         """
         Load spikes from the raw data.
         """
         spikes = {}
-        # TODO this seems wrong since may have already had some curation
-        # TODO this is expensive, can we not recalculate every time? has it already been calculated?
         for i in tqdm(range(self.n_clusters), desc="Loading spike data"):
             if (i in self.cluster_ids) and (self.counts[i] > 0):
                 spikes[i] = extract_spikes(
@@ -479,10 +537,3 @@ class Curator(object):
                     max_spikes=self.params["max_spikes"],
                 )
         return spikes
-
-
-if __name__ == "__main__":
-    ks_folder = r"D:\040224_INS2_4_DT3_rec_g0\catgt_040224_INS2_4_DT3_rec_g0\040224_INS2_4_DT3_rec_g0_imec0\imec0_ks2"
-    curator = Curator(ks_folder)
-    curator.template_similarity(0)
-    curator.merge([0, 1])
