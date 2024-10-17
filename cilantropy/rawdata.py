@@ -1,6 +1,7 @@
 import numpy as np
 
 
+# TODO LFP vs AP?
 class RawData(object):
     def __init__(self, bin_path: str, n_channels: int | None = None) -> None:
         self.bin_path = bin_path

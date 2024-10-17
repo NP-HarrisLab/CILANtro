@@ -9,6 +9,11 @@ dependencies:
   - black
   - numpy
   - marshmallow
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pytorch-cuda
+  - scikit-learn
   - pip:
     - pynwb
     - neuroconv

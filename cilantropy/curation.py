@@ -1,84 +1,26 @@
+import json
 import logging
 import os
 
+import burst_detector as bd
+import cupy as cp
 import numpy as np
 import pandas as pd
-from marshmallow import Schema, fields
-from tqdm import tqdm
+from burst_detector import (
+    calc_sliding_RP_viol,
+    calc_SNR,
+    calc_wf_shape_metrics,
+    extract_noise,
+)
+from numpy.typing import NDArray
 
+from cilantropy.params import AutoCurateParams, CuratorParams
 from cilantropy.rawdata import RawData
-from cilantropy.utils import extract_spikes, find_times_multi
+
+# from spike_fixer.modules.merge import merge_clusters
+
 
 logger = logging.getLogger("cilantropy")
-
-
-class CuratorParams(Schema):
-    # TODO get rid of RemovedInMarshmallow4Warning
-    """
-    Class for curation parameters
-    """
-
-    ks_folder = fields.Str(
-        required=True,
-        description="Path to kilosort folder.",
-        validate=lambda x: os.path.exists(x),
-    )
-    data_path = fields.Str(
-        required=True,
-        description="Filepath to recording binary.",
-        validate=lambda x: os.path.exists(x),
-    )
-    dtype = fields.Str(required=True, description="Data type of recording binary.")
-    offset = fields.Int(required=True, description="Offset of recording binary.")
-    sample_rate = fields.Float(
-        required=True,
-        description="Sampling rate of recording.",
-        validate=lambda x: x > 0,
-    )
-    hp_filtered = fields.Bool(required=True, description="High-pass filtered or not.")
-    n_channels = fields.Int(
-        required=True,
-        description="Number of channels in recording binary.",
-        validate=lambda x: x > 0,
-    )
-    pre_samples = fields.Int(
-        missing=20,
-        description="Number of samples to extract before the peak of the spike.",
-    )
-    post_samples = fields.Int(
-        missing=62,
-        description="Number of samples to extract after the peak of the spike.",
-    )
-    max_spikes = fields.Int(
-        required=False,
-        missing=1000,
-        description="Maximum number of spikes per cluster used to calculate mean waveforms and cross projections. -1 uses all spikes.",
-    )
-    # simularity_type = fields.Str(
-    #     required=False,
-    #     default="ae",
-    #     description="Type of similarity metric to use, must be either 'ae' (for autoencoder similarity) or 'mean' (for mean similarity)",
-    # )
-    # check_jitter = fields.Bool(
-    #     required=False,
-    #     default=False,
-    #     description="Whether mean similarity calculations should check for time shifts between waveforms.",
-    # )
-    # jitter_amount = fields.Int(
-    #     required=False,
-    #     default=5,
-    #     description="Number of samples to search in each direction for time shifts between waveforms.",
-    # )
-    # similarity_threshold = fields.Float(
-    #     required=False,
-    #     default=0.4,
-    #     description="Similarity threshold for a cluster pair to undergo further stages.",
-    # )
-    # min_spikes = fields.Int(
-    #     required=False,
-    #     default=100,
-    #     description="Minimum number of spikes in a cluster to undergo further stages.",
-    # )
 
 
 class Curator(object):
@@ -88,45 +30,72 @@ class Curator(object):
     Attributes:
         cluster_metrics: pd.DataFrame
             Cluster metrics.
-        spike_clusters: np.ndarray
+        spike_clusters: NDArray
             cluster_id for each spike. Shape (n_spikes,)
+        n_clusters: int
+            Number of clusters.
+        cluster_ids: NDArray
+            Unique cluster_ids.
+        ks_folder: str
+            Path to kilosort folder.
+        raw_data: RawData
+            RawData object.
+        spike_times: NDArray
+            Spike times. Shape (n_spikes,)
+        params: CuratorParams
+            Parameters for curation.
+        cluster_metrics: pd.DataFrame
+            Cluster metrics.
+        mean_wf: NDArray
+            Mean waveforms for each cluster. Shape (n_clusters, n_channels, pre_samples + post_samples)
+        std_wf: NDArray
+            Standard deviation of waveforms for each cluster. Shape (n_clusters, n_channels, pre_samples + post_samples)
+        channel_pos: NDArray
+            Channel positions. Shape (n_channels, 2)
+        times_multi: NDArray
+            Spike times for each cluster. Shape (n_clusters, n_spikes)
     """
 
-    def __init__(self, ks_folder: str) -> None:
+    # TODO fix parameters
+    def __init__(self, ks_folder: str, **kwargs) -> None:
         self.ks_folder = ks_folder
-        self._load_ksdata()
-        self._load_metrics()
+        self.params: CuratorParams
+        self.n_clusters: int
+        self.cluster_ids: NDArray
+        self.raw_data: RawData
+        self.cluster_metrics: pd.DataFrame
+        self.mean_wf: NDArray
+        self.std_wf: NDArray
+        self.channel_pos: NDArray
+        self._calc_metrics(**kwargs)
 
     @property
     def n_clusters(self) -> int:
         return self.cluster_metrics.shape[0]
 
     @property
-    def cluster_ids(self) -> np.ndarray:
-        return np.unique(self.spike_clusters)
+    def cluster_ids(self) -> NDArray:
+        return self.cluster_metrics["cluster_id"].values
 
-    def _load_ksdata(self) -> None:
-        self._load_params()
-        self.raw_data = RawData(self.params["data_path"], self.params["n_channels"])
+    @property
+    def n_channels(self) -> int:
+        return self.params["n_chan"]
 
-        # load spike_clusters
-        try:
-            self.spike_clusters = np.load(
-                os.path.join(self.ks_folder, "spike_clusters.npy")
-            ).flatten()
-        except FileNotFoundError:
-            self.spike_clusters = np.load(
-                os.path.join(self.ks_folder, "spike_templates.npy")
-            ).flatten()
+    @property
+    def peak_channels(self) -> NDArray:
+        return self.cluster_metrics["peak"].values
 
-        # load spike_times
-        self.spike_times = np.load(
-            os.path.join(self.ks_folder, "spike_times.npy")
-        ).flatten()
+    @property
+    def good_clusters(self) -> NDArray[np.bool_]:
+        return self.cluster_metrics["label"].values == "good"
 
-    def _load_params(self):
-        params = {"ks_folder": self.ks_folder}
+    @property
+    def counts(self) -> NDArray:
+        return self.cluster_metrics["n_spikes"].values
 
+    def _load_params(self, **kwargs) -> None:
+        params = kwargs
+        params["KS_folder"] = self.ks_folder
         # load params from params.py
         params_file = os.path.join(self.ks_folder, "params.py")
         with open(params_file, "r") as f:
@@ -142,17 +111,39 @@ class Curator(object):
             params["data_path"] = os.path.abspath(
                 os.path.join(self.ks_folder, params["data_path"])
             )
-        params["n_channels"] = params.pop("n_channels_dat")
+        params["n_chan"] = params.pop("n_channels_dat")
 
         self.params = CuratorParams().load(params)
 
-    def _load_metrics(self) -> None:
+    def _calc_metrics(self, **kwargs) -> None:
         # check if cilantro_metrics.tsv exists
         metrics_path = os.path.join(self.ks_folder, "cilantro_metrics.tsv")
+        params_path = os.path.join(self.ks_folder, "cilantro_params.json")
         if os.path.exists(metrics_path):
             self.cluster_metrics = pd.read_csv(metrics_path, sep="\t")
+            with open(params_path, "r") as f:
+                params = json.load(f)
+            self.params = CuratorParams().load(params)
         else:
             # if not, load metrics from individual files
+            self._load_params(**kwargs)
+            self.raw_data = RawData(self.params["data_path"], self.params["n_chan"])
+            # load spike_clusters
+            try:
+                spike_clusters = np.load(
+                    os.path.join(self.ks_folder, "spike_clusters.npy")
+                ).flatten()
+            except FileNotFoundError:
+                spike_clusters = np.load(
+                    os.path.join(self.ks_folder, "spike_templates.npy")
+                ).flatten()
+            self.spike_times = np.load(
+                os.path.join(self.ks_folder, "spike_times.npy")
+            ).flatten()
+            self.channel_pos = np.load(
+                os.path.join(self.ks_folder, "channel_positions.npy")
+            )
+
             self.cluster_metrics = pd.DataFrame()
 
             seps = {".csv": ",", ".tsv": "\t"}
@@ -184,87 +175,58 @@ class Curator(object):
             self._cleanup_metrics()  # cleanup column names and remove unnecessary ones
 
             # remove cluster_ids that are not in spike_clusters
-            cluster_ids, counts = np.unique(self.spike_clusters, return_counts=True)
-
-            self.cluster_metrics = self.cluster_metrics[
-                self.cluster_metrics["cluster_id"].isin(cluster_ids)
-            ]
+            cluster_ids, counts = np.unique(spike_clusters, return_counts=True)
 
             # Occassionally n_spikes is not correct, so override it with the actual count
-            self.cluster_metrics["n_spikes"] = counts
+            counts = pd.DataFrame({"cluster_id": cluster_ids, "n_spikes": counts})
+            self.cluster_metrics = pd.merge(
+                self.cluster_metrics, counts, on="cluster_id", how="outer"
+            )
+            # not all clusters had spikes, update NaN to 0
+            self.cluster_metrics["n_spikes"] = self.cluster_metrics["n_spikes"].fillna(
+                0
+            )
+            # convert to int
+            self.cluster_metrics["n_spikes"] = self.cluster_metrics["n_spikes"].astype(
+                int
+            )
 
             # add spike_times
             self.cluster_metrics["spike_times"] = self.cluster_metrics[
                 "cluster_id"
-            ].map(lambda x: self.spike_times[self.spike_clusters == x])
+            ].map(lambda x: self.spike_times[spike_clusters == x])
 
-            self.mean_wf = self._calc_mean_wf()
-            # TODO ensure order of cluster_ids is correct?
-            self.cluster_metrics["peaks"] = np.argmax(
-                np.max(self.mean_wf, 2) - np.min(self.mean_wf, 2), 1
+            self.times_multi = bd.find_times_multi(
+                self.spike_times,
+                spike_clusters,
+                np.arange(self.n_clusters),
+                self.raw_data.data,
+                self.params["pre_samples"],
+                self.params["post_samples"],
             )
-            print("done")
-            # save metrics to file
-            # self.cluster_metrics.to_csv(metrics_path, sep="\t", index=False)
-
-    def _calc_mean_wf(self) -> np.ndarray:
-        """
-        Calculate mean waveforms for each cluster. Need to have loaded some metrics.
-
-        Returns:
-            np.ndarray: Mean waveforms for each cluster. Shape (n_clusters, n_channels, pre_samples + post_samples)
-        """
-        mean_wf_path = os.path.join(self.ks_folder, "mean_waveforms.npy")
-        if os.path.exists(mean_wf_path):
-            return np.load(mean_wf_path)
-
-        logger.info("Calculating mean waveforms...")
-
-        mean_wf = np.zeros(
-            (
+            self.mean_wf, self.std_wf, _ = bd.calc_mean_and_std_wf(
+                self.params,
                 self.n_clusters,
-                self.params["n_channels"],
-                self.params["pre_samples"] + self.params["post_samples"],
+                cluster_ids,
+                self.times_multi,
+                self.raw_data.data,
+                return_spikes=False,
             )
-        )
-        for i in tqdm(self.cluster_ids, desc="Calculating mean waveforms"):
-            spikes = self._extract_spikes(i)
-            mean_wf[i, :, :] = np.mean(spikes, axis=0)
 
-        np.save(mean_wf_path, mean_wf)
-
-        return mean_wf
-
-    def _extract_spikes(self, clust_id: int) -> np.ndarray:
-        times: np.ndarray = self.cluster_metrics["spike_times"][clust_id]
-
-        # ignore spikes cut off by ends of recording
-        while (times[0] - self.params["pre_samples"]) < 0:
-            times = times[1:]
-        while (times[-1] + self.params["post_samples"]) >= self.raw_data.shape[0]:
-            times = times[:-1]
-
-        # randomly pick spikes if cluster has too many
-        if (self.params["max_spikes"] != -1) and (
-            self.params["max_spikes"] < times.shape[0]
-        ):
-            np.random.shuffle(times)
-            times = times[: self.params["max_spikes"]]
-        spikes = np.zeros(
-            (
-                times.shape[0],
-                self.params["n_channels"],
-                self.params["pre_samples"] + self.params["post_samples"],
+            print("LOADED")
+            # self.cluster_metrics["mean_wf"] = [self.mean_wf[i, :, :] for i in self.cluster_ids]
+            amplitude = cp.max(self.mean_wf, 2) - cp.min(self.mean_wf, 2)
+            self.cluster_metrics["amplitude"] = [
+                amplitude[i, :] for i in self.cluster_ids
+            ]
+            self.cluster_metrics["peak"] = self.cluster_metrics["amplitude"].apply(
+                lambda x: np.argmax(x, axis=0)
             )
-        )
-        for i in range(times.shape[0]):
-            spikes[i, :, :] = self.raw_data.data[
-                times[i]
-                - self.params["pre_samples"] : times[i]
-                + self.params["post_samples"],
-                :,
-            ].T
-        return spikes
+
+            self._calculate_additional_metrics()
+            logger.info("Calculated metrics")
+            # save metrics to file
+            self.cluster_metrics.to_csv(metrics_path, sep="\t", index=False)
 
     def _cleanup_metrics(self) -> None:
         # remove duplicate columns
@@ -281,8 +243,8 @@ class Curator(object):
                 downcast="integer",
             )
 
-        # Add label_reason column and set to NA
-        self.cluster_metrics["label_reason"] = pd.NA  # TODO or empty string better?
+        # Add label_reason column
+        self.cluster_metrics["label_reason"] = ""
 
         # rename group to label if it exists or use KSLabel
         if "group" not in self.cluster_metrics.columns:
@@ -301,6 +263,7 @@ class Curator(object):
         self.cluster_metrics = self.cluster_metrics.loc[
             :, ~self.cluster_metrics.columns.str.contains("Unnamed")
         ]  # remove unnamed columns
+        self.cluster_metrics.drop(columns=["ContamPct"], axis=1, inplace=True)
         self.cluster_metrics.drop(
             columns=["peak_channel"], axis=1, inplace=True, errors="ignore"
         )  # we will calculate this later
@@ -308,10 +271,228 @@ class Curator(object):
         # sort by cluster_id
         self.cluster_metrics.sort_values("cluster_id", inplace=True)
 
+    def _calculate_additional_metrics(self) -> None:
+        # TODO: don't save csv files, just save to dataframe
+        # SNR
+        snr_path = os.path.join(self.ks_folder, "cluster_SNR_good.tsv")
+        if not os.path.exists(snr_path):
+            logger.info("Calculating background standard deviation...")
+            noise = extract_noise(
+                self.raw_data.data, self.spike_times, 20, 62, n_chan=self.n_channels
+            )
+            noise_stds = np.std(noise, axis=1)
+            snrs = calc_SNR(self.mean_wf, noise_stds, self.cluster_ids)
+            snr_df = pd.DataFrame({"cluster_id": self.cluster_ids, "SNR_good": snrs})
+            snr_df.to_csv(
+                os.path.join(self.ks_folder, "cluster_SNR_good.tsv"), sep="\t"
+            )
+            logger.info("SNR file saved.")
+        else:
+            snr_df = pd.read_csv(snr_path, sep="\t")
+
+        if "SNR_good" not in self.cluster_metrics.columns:
+            self.cluster_metrics = pd.merge(
+                self.cluster_metrics, snr_df, on="cluster_id", how="outer"
+            )
+
+        # refractory period violations
+        cluster_rp_path = os.path.join(self.ks_folder, "cluster_RP_conf.tsv")
+        if not os.path.exists(cluster_rp_path):
+            logger.info("Calculating refractory period violations...")
+            slid_rp_viols = calc_sliding_RP_viol(
+                self.times_multi, self.cluster_ids, self.n_clusters
+            )
+            srv_df = pd.DataFrame(
+                {"cluster_id": self.cluster_ids, "slid_RP_viol": slid_rp_viols}
+            )
+            srv_df.to_csv(cluster_rp_path, sep="\t")
+            print("RP file saved.")
+        else:
+            srv_df = pd.read_csv(cluster_rp_path, sep="\t")
+
+        if "slid_RP_viol" not in self.cluster_metrics.columns:
+            self.cluster_metrics = pd.merge(
+                self.cluster_metrics, srv_df, on="cluster_id", how="outer"
+            )
+
+        # cluster waveform shapes
+        wf_path = os.path.join(self.ks_folder, "cluster_wf_shape.tsv")
+        if not os.path.exists(wf_path):
+            logger.info("Calculating waveform shape metrics...")
+            num_peaks, num_troughs, wf_durs, spat_decay, amplitude = (
+                calc_wf_shape_metrics(self.mean_wf, self.cluster_ids, self.channel_pos)
+            )
+            wf_df = pd.DataFrame(
+                {
+                    "cluster_id": self.cluster_ids,
+                    "n_peaks": num_peaks,
+                    "n_troughs": num_troughs,
+                    "wf_dur": wf_durs,
+                    "spat_decay": spat_decay,
+                    "amplitude": amplitude,
+                }
+            )
+            wf_df.to_csv(wf_path, sep="\t")
+            logger.info("WF file saved.")
+        else:
+            wf_df = pd.read_csv(wf_path, sep="\t")
+            if "spat_decays" in wf_df.columns:
+                wf_df.rename(columns={"spat_decays": "spat_decay"}, inplace=True)
+                wf_df.to_csv(wf_path, sep="\t", index=False)
+            if "num_peaks" in wf_df.columns:
+                wf_df.rename(columns={"num_peaks": "n_peaks"}, inplace=True)
+                wf_df.to_csv(wf_path, sep="\t", index=False)
+            if "num_troughs" in wf_df.columns:
+                wf_df.rename(columns={"num_troughs": "n_troughs"}, inplace=True)
+                wf_df.to_csv(wf_path, sep="\t", index=False)
+
+        new_columns = [
+            col for col in wf_df.columns if col not in self.cluster_metrics.columns
+        ]  # some of these columns may overlap with other data in table already
+        self.cluster_metrics = pd.merge(
+            self.cluster_metrics,
+            wf_df[["cluster_id"] + new_columns],
+            on="cluster_id",
+            how="left",
+        )
+
+        # in case any new unnamed clusters
+        self.cluster_metrics = self.cluster_metrics.loc[
+            :, ~self.cluster_metrics.columns.str.contains("Unnamed")
+        ]  # remove unnamed columns
+
+    def auto_curate(self, save_labels=True, **kwargs) -> None:
+        schema = AutoCurateParams()
+        params = schema.load(kwargs)
+
+        # mark low-spike units as noise
+        low_spike_units = self.cluster_metrics[
+            self.cluster_metrics["n_spikes"] < params["min_spikes"]
+        ].index
+        self.cluster_metrics.loc[low_spike_units, "label_reason"] = "low spike count"
+        self.cluster_metrics.loc[low_spike_units, "label"] = "noise"
+
+        # mark low snr units as noise
+        low_snr_units = self.cluster_metrics[
+            self.cluster_metrics["SNR_good"] < params["min_snr"]
+        ].index
+        self.cluster_metrics.loc[low_snr_units, "label_reason"] = "low SNR"
+        self.cluster_metrics.loc[low_snr_units, "label"] = "noise"
+
+        # mark units with high RP violations as mua
+        high_rp_units = self.cluster_metrics[
+            (self.cluster_metrics["slid_RP_viol"] > params["max_rp_viol"])
+            & (self.cluster_metrics["label"].isin(params["good_lbls"]))
+        ].index
+        self.cluster_metrics.loc[high_rp_units, "label_reason"] = "high RP violations"
+        self.cluster_metrics.loc[high_rp_units, "label"] = "mua"
+
+        # mark units with too many peaks and troughs as noise
+        high_peaks_units = self.cluster_metrics[
+            self.cluster_metrics["n_peaks"] > params["max_peaks"]
+        ].index
+        self.cluster_metrics.loc[high_peaks_units, "label_reason"] = "too many peaks"
+        self.cluster_metrics.loc[high_peaks_units, "label"] = "noise"
+
+        high_troughs_units = self.cluster_metrics[
+            self.cluster_metrics["n_troughs"] > params["max_troughs"]
+        ].index
+        self.cluster_metrics.loc[high_troughs_units, "label_reason"] = (
+            "too many troughs"
+        )
+        self.cluster_metrics.loc[high_troughs_units, "label"] = "noise"
+
+        # mark units with long waveform duration as noise
+        long_wf_units = self.cluster_metrics[
+            self.cluster_metrics["wf_dur"] > params["max_wf_dur"]
+        ].index
+        self.cluster_metrics.loc[long_wf_units, "label_reason"] = "long waveform"
+        self.cluster_metrics.loc[long_wf_units, "label"] = "noise"
+
+        # mark units with low spatial decay as noise
+        low_spat_decay_units = self.cluster_metrics[
+            self.cluster_metrics["spat_decay"] < params["min_spat_decay"]
+        ].index
+        self.cluster_metrics.loc[low_spat_decay_units, "label_reason"] = (
+            "low spatial decay"
+        )
+        self.cluster_metrics.loc[low_spat_decay_units, "label"] = "noise"
+
+        if save_labels:
+            # overwrite cluster_group.tsv with new labels
+            cluster_labels = self.cluster_metrics[["cluster_id", "label"]]
+            cluster_labels.to_csv(
+                os.path.join(self.ks_folder, "cluster_group.tsv"),
+                sep="\t",
+                index=False,
+            )
+            print("Labels saved.")
+
+    def auto_merge(self, auto_accept=True, **kwargs) -> None:
+        bd.run.main(kwargs)
+        # auto accept merges
+        if auto_accept:
+            # merge suggested clusters
+            pass
+
+    def get_new_id(self) -> int:
+        """
+        Get a new cluster_id.
+
+        Returns:
+            int: New cluster_id.
+        """
+        return self.cluster_ids.max() + 1
+
+    def merge_clusters(self, cluster_ids: list[int]) -> int:
+        """
+        Merge clusters together into a new cluster.
+
+        Args:
+            cluster_ids (list[int]): List of cluster_ids to merge.
+
+        Returns:
+            int: New cluster_id.
+        """
+        old_rows = self.cluster_metrics[
+            self.cluster_metrics["cluster_id"].isin(cluster_ids)
+        ]
+        new_id = self.get_new_id()
+
+        # calculate new mean_wf and std_wf
+        mean_wf = np.mean([self.mean_wf[i, :, :] for i in cluster_ids], axis=0)
+        std_wf = np.std([self.std_wf[i, :, :] for i in cluster_ids], axis=0)
+
+        self.mean_wf = np.vstack([self.mean_wf, mean_wf[np.newaxis, ...]])
+        self.std_wf = np.vstack([self.std_wf, std_wf[np.newaxis, ...]])
+
+        # calculate new metrics
+        
+        # get new cluster id and create new row
+        new_row = {
+            "cluster_id": new_id,
+            "label": old_rows["label"].mode().values[0],  # TODO,
+            "label_reason": old_rows["label_reason"].mode().values[0],  # TODO,
+            "KSLabel": old_rows["KSLabel"].mode().values[0],  # TODO,
+            "n_spikes": old_rows["n_spikes"].sum(),
+            "spike_times": old_rows["spike_times"].sum(),
+            "slid_rp_viol": new_slid_rp_viol,
+            "SNR_good": new_snr,
+            "n_peaks": new_n_peaks,
+            "n_troughs": new_n_troughs,
+            "wf_dur": new_wf_dur,
+            "spat_decay": new_spat_decay,
+            "amplitude": new_amplitude,
+            "peak": new_peak,
+        }
+        # mean_wf
+        # std_wf
+        old_rows["label"] = "merged"
+        old_rows["label_reason"] = f"merged into cluster_id {new_id}"
+
 
 if __name__ == "__main__":
-    # ks_folder = r"D:\040224_INS2_4_DT3_rec_g0\catgt_040224_INS2_4_DT3_rec_g0\040224_INS2_4_DT3_rec_g0_imec0\imec0_ks2"
-    ks_folder = r"D:\040224_INS2_4_DT3_rec_g0\040224_INS2_4_DT3_rec_g0_imec0"
-    curator = Curator(ks_folder)
-    # curator.template_similarity(0)
-    # curator.merge([0, 1])
+    ks_folder = r"E:T05\20240718_T05\catgt_20240718_T05_Bank0_SemiCheck_R_g0\20240718_T05_Bank0_SemiCheck_R_g0_imec0\imec0_ks25"
+    c = Curator(ks_folder)
+    c.auto_curate()
+    c.auto_merge()
