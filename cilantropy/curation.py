@@ -17,6 +17,7 @@ from numpy.typing import NDArray
 
 from cilantropy.params import AutoCurateParams, CuratorParams
 from cilantropy.rawdata import RawData
+from cilantropy.utils import calc_amplitude_cutoff, calc_presence_ratio
 
 # from spike_fixer.modules.merge import merge_clusters
 
@@ -73,7 +74,7 @@ class Curator(object):
 
     @property
     def n_clusters(self) -> int:
-        return self.cluster_metrics.shape[0]
+        return self.cluster_metrics["cluster_id"].iloc[-1] + 1
 
     @property
     def cluster_ids(self) -> NDArray:
@@ -122,15 +123,46 @@ class Curator(object):
         metrics_path = os.path.join(self.ks_folder, "cilantro_metrics.tsv")
         params_path = os.path.join(self.ks_folder, "cilantro_params.json")
 
-        # if os.path.exists(metrics_path) and os.path.exists(params_path): #  TODO need ot load other data too...
-        #     self.cluster_metrics = pd.read_csv(metrics_path, sep="\t")
-        #     try:
-        #         with open(params_path, "r") as f:
-        #             params = json.load(f)
-        #         self.params = CuratorParams().load(params)
-        #         return
-        #     except json.JSONDecodeError:
-        #         print("Error loading parameters from json file. Recalculating...")
+        if os.path.exists(metrics_path) and os.path.exists(
+            params_path
+        ):  #  TODO need ot load other data too...
+            self.cluster_metrics = pd.read_csv(metrics_path, sep="\t")
+            # try:
+            #     with open(params_path, "r") as f:
+            #         params = json.load(f)
+            #     self.params = CuratorParams().load(params)
+            #     self.mean_wf = np.load(
+            #         os.path.join(params["KS_folder"], "mean_waveforms.npy")
+            #     )
+            #     self.std_wf = np.load(
+            #         os.path.join(params["KS_folder"], "std_waveforms.npy")
+            #     )
+            #     self.raw_data = RawData(self.params["data_path"], self.params["n_chan"])
+            #     self.spike_times = np.load(
+            #         os.path.join(self.ks_folder, "spike_times.npy")
+            #     ).flatten()
+            #     self.channel_pos = np.load(
+            #         os.path.join(self.ks_folder, "channel_positions.npy")
+            #     )
+            #     try:
+            #         spike_clusters = np.load(
+            #             os.path.join(self.ks_folder, "spike_clusters.npy")
+            #         ).flatten()
+            #     except FileNotFoundError:
+            #         spike_clusters = np.load(
+            #             os.path.join(self.ks_folder, "spike_templates.npy")
+            #         ).flatten()
+            #     self.times_multi = bd.find_times_multi(
+            #         self.spike_times,
+            #         spike_clusters,
+            #         np.arange(self.n_clusters),
+            #         self.raw_data.data,
+            #         self.params["pre_samples"],
+            #         self.params["post_samples"],
+            #     )
+            #     return
+            # except json.JSONDecodeError:
+            #     print("Error loading parameters from json file. Recalculating...")
 
         # if not, load metrics from individual files
         self._load_params(**kwargs)
@@ -181,21 +213,10 @@ class Curator(object):
 
         # remove cluster_ids that are not in spike_clusters
         cluster_ids, counts = np.unique(spike_clusters, return_counts=True)
-        n_spikes = np.zeros(self.n_clusters)
-        n_spikes[cluster_ids] = counts
-
-        # Occassionally n_spikes is not correct, so override it with the actual count
-        self.cluster_metrics["n_spikes"] = n_spikes
-
-        # not all clusters had spikes, update NaN to 0
-        self.cluster_metrics["n_spikes"] = self.cluster_metrics["n_spikes"].fillna(0)
-        # convert to int
-        self.cluster_metrics["n_spikes"] = self.cluster_metrics["n_spikes"].astype(int)
-
-        # add spike_times
-        self.cluster_metrics["spike_times"] = self.cluster_metrics["cluster_id"].map(
-            lambda x: self.spike_times[spike_clusters == x]
-        )
+        self.cluster_metrics["n_spikes"] = 0
+        self.cluster_metrics.loc[
+            self.cluster_metrics["cluster_id"].isin(cluster_ids), "n_spikes"
+        ] = counts
 
         self.times_multi = bd.find_times_multi(
             self.spike_times,
@@ -362,7 +383,7 @@ class Curator(object):
             :, ~self.cluster_metrics.columns.str.contains("Unnamed")
         ]  # remove unnamed columns
 
-    def auto_curate(self, save_labels=True, **kwargs) -> None:
+    def auto_curate(self, **kwargs) -> None:
         schema = AutoCurateParams()
         params = schema.load(kwargs)
 
@@ -419,16 +440,6 @@ class Curator(object):
         )
         self.cluster_metrics.loc[low_spat_decay_units, "label"] = "noise"
 
-        if save_labels:
-            # overwrite cluster_group.tsv with new labels
-            cluster_labels = self.cluster_metrics[["cluster_id", "label"]]
-            cluster_labels.to_csv(
-                os.path.join(self.ks_folder, "cluster_group.tsv"),
-                sep="\t",
-                index=False,
-            )
-            print("Labels saved.")
-
     def auto_merge(self, **kwargs) -> None:
         bd.run.main(kwargs)
 
@@ -456,6 +467,9 @@ class Curator(object):
         Returns:
             int: New cluster_id.
         """
+        # if new_id exists skip
+        if new_id in self.cluster_metrics["cluster_id"].values:
+            return
         old_rows = self.cluster_metrics[
             self.cluster_metrics["cluster_id"].isin(cluster_ids)
         ]
@@ -510,7 +524,11 @@ class Curator(object):
         new_spike_times = np.array(
             list(itertools.chain.from_iterable(old_rows["spike_times"]))
         )
+        # add new spike times to times_multi
+        while len(self.times_multi) < new_id:
+            self.times_multi.append(np.array([]))
         self.times_multi.append(new_spike_times)
+
         new_slid_rp_viol = calc_sliding_RP_viol(
             [new_spike_times], clust_ids=[0], n_clust=1
         )[0]
@@ -537,11 +555,12 @@ class Curator(object):
         new_peak = peak[new_id]
 
         # get new cluster id and create new row
+        # TODO ensure this is one row that is being added once
         new_row = pd.DataFrame(
             {
                 "cluster_id": new_id,
-                "label": old_rows["label"].mode().values[0],  # TODO,
-                "label_reason": old_rows["label_reason"].mode().values[0],  # TODO,
+                "label": old_rows["label"].mode().values[0],
+                "label_reason": f"merged from cluster_ids {cluster_ids}",
                 "KSLabel": "",
                 "n_spikes": old_rows["n_spikes"].sum(),
                 "spike_times": [new_spike_times],
@@ -567,6 +586,27 @@ class Curator(object):
         self.cluster_metrics.loc[
             self.cluster_metrics["cluster_id"].isin(cluster_ids), "label_reason"
         ] = f"merged into cluster_id {new_id}"
+
+    def post_merge_curation(self) -> None:
+        # mark clusters with amplitude cutoff = 0.5 as inc
+        self.cluster_metrics = calc_amplitude_cutoff(self.cluster_metrics)
+        high_amp_units = self.cluster_metrics[
+            (self.cluster_metrics["amplitude_cutoff"] == 0.5)
+            & (self.cluster_metrics["label"] == "good")
+        ].index
+        self.cluster_metrics.loc[high_amp_units, "label_reason"] = (
+            "high amplitude cutoff"
+        )
+        self.cluster_metrics.loc[high_amp_units, "label"] = "inc"
+
+        # mark clusters with presence ratio < 0.9 as inc
+        self.cluster_metrics = calc_presence_ratio(self.cluster_metrics)
+        low_pr_units = self.cluster_metrics[
+            (self.cluster_metrics["presence_ratio"] < 0.9)
+            & (self.cluster_metrics["label"] == "good")
+        ].index
+        self.cluster_metrics.loc[low_pr_units, "label_reason"] = "low presence ratio"
+        self.cluster_metrics.loc[low_pr_units, "label"] = "inc"
 
     def save_data(self) -> None:
         # TODO overwrite any other files?
@@ -625,7 +665,9 @@ class Curator(object):
         )
 
     def calc_spike_clusters(self) -> NDArray[np.uint32]:  # but says int32 in doc
-        spikes_clusters = np.load(os.path.join(self.ks_folder, "spike_clusters.npy")).flatten()
+        spikes_clusters = np.load(
+            os.path.join(self.ks_folder, "spike_clusters.npy")
+        ).flatten()
         for new_id, old_ids in self.merges.items():
             spikes_clusters[np.isin(spikes_clusters, old_ids)] = new_id
         return spikes_clusters
