@@ -1,6 +1,7 @@
 import numpy as np
 
 
+# TODO LFP vs AP?
 class RawData(object):
     def __init__(self, bin_path: str, n_channels: int | None = None) -> None:
         self.bin_path = bin_path
@@ -9,6 +10,10 @@ class RawData(object):
 
         self.data = np.memmap(self.bin_path, dtype="int16", mode="r")
         self.data = np.reshape(self.data, (-1, self.n_channels))
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self.data.shape
 
     def _get_num_channels(self) -> int:
         """Get the number of channels from the meta file."""
