@@ -61,7 +61,7 @@ class Curator(object):
     # TODO fix parameters
     def __init__(self, ks_folder: str, **kwargs) -> None:
         self.ks_folder = ks_folder
-        self.params: CuratorParams
+        self.params: dict
         self.n_clusters: int
         self.cluster_ids: NDArray
         self.raw_data: RawData
@@ -117,52 +117,54 @@ class Curator(object):
         params["n_chan"] = params.pop("n_channels_dat")
 
         self.params = CuratorParams().load(params)
+        if type(self.params) != dict:
+            self.params = self.params._asdict()["data"]
 
     def _calc_metrics(self, **kwargs) -> None:
         # check if cilantro_metrics.tsv exists
         metrics_path = os.path.join(self.ks_folder, "cilantro_metrics.tsv")
         params_path = os.path.join(self.ks_folder, "cilantro_params.json")
 
-        if os.path.exists(metrics_path) and os.path.exists(
-            params_path
-        ):  #  TODO need ot load other data too...
-            self.cluster_metrics = pd.read_csv(metrics_path, sep="\t")
-            # try:
-            #     with open(params_path, "r") as f:
-            #         params = json.load(f)
-            #     self.params = CuratorParams().load(params)
-            #     self.mean_wf = np.load(
-            #         os.path.join(params["KS_folder"], "mean_waveforms.npy")
-            #     )
-            #     self.std_wf = np.load(
-            #         os.path.join(params["KS_folder"], "std_waveforms.npy")
-            #     )
-            #     self.raw_data = RawData(self.params["data_path"], self.params["n_chan"])
-            #     self.spike_times = np.load(
-            #         os.path.join(self.ks_folder, "spike_times.npy")
-            #     ).flatten()
-            #     self.channel_pos = np.load(
-            #         os.path.join(self.ks_folder, "channel_positions.npy")
-            #     )
-            #     try:
-            #         spike_clusters = np.load(
-            #             os.path.join(self.ks_folder, "spike_clusters.npy")
-            #         ).flatten()
-            #     except FileNotFoundError:
-            #         spike_clusters = np.load(
-            #             os.path.join(self.ks_folder, "spike_templates.npy")
-            #         ).flatten()
-            #     self.times_multi = bd.find_times_multi(
-            #         self.spike_times,
-            #         spike_clusters,
-            #         np.arange(self.n_clusters),
-            #         self.raw_data.data,
-            #         self.params["pre_samples"],
-            #         self.params["post_samples"],
-            #     )
-            #     return
-            # except json.JSONDecodeError:
-            #     print("Error loading parameters from json file. Recalculating...")
+        # if os.path.exists(metrics_path) and os.path.exists(
+        #     params_path
+        # ):  #  TODO need ot load other data too...
+        #     self.cluster_metrics = pd.read_csv(metrics_path, sep="\t")
+        #     try:
+        #         with open(params_path, "r") as f:
+        #             params = json.load(f)
+        #         self.params = CuratorParams().load(params)
+        #         self.mean_wf = np.load(
+        #             os.path.join(params["KS_folder"], "mean_waveforms.npy")
+        #         )
+        #         self.std_wf = np.load(
+        #             os.path.join(params["KS_folder"], "std_waveforms.npy")
+        #         )
+        #         self.raw_data = RawData(self.params["data_path"], self.params["n_chan"])
+        #         self.spike_times = np.load(
+        #             os.path.join(self.ks_folder, "spike_times.npy")
+        #         ).flatten()
+        #         self.channel_pos = np.load(
+        #             os.path.join(self.ks_folder, "channel_positions.npy")
+        #         )
+        #         try:
+        #             spike_clusters = np.load(
+        #                 os.path.join(self.ks_folder, "spike_clusters.npy")
+        #             ).flatten()
+        #         except FileNotFoundError:
+        #             spike_clusters = np.load(
+        #                 os.path.join(self.ks_folder, "spike_templates.npy")
+        #             ).flatten()
+        #         self.times_multi = bd.find_times_multi(
+        #             self.spike_times,
+        #             spike_clusters,
+        #             np.arange(self.n_clusters),
+        #             self.raw_data.data,
+        #             self.params["pre_samples"],
+        #             self.params["post_samples"],
+        #         )
+        #         return
+        #     except json.JSONDecodeError:
+        #         print("Error loading parameters from json file. Recalculating...")
 
         # if not, load metrics from individual files
         self._load_params(**kwargs)
@@ -179,6 +181,15 @@ class Curator(object):
         self.spike_times = np.load(
             os.path.join(self.ks_folder, "spike_times.npy")
         ).flatten()
+
+        # edge case: remove any spike times that are past the end of the data
+        new_spike_times = self.spike_times[
+            self.spike_times < self.raw_data.data.shape[0]
+        ]
+        if len(new_spike_times) < len(self.spike_times):
+            print("Removing spike times that are past the end of the data.")
+        self.spike_times = new_spike_times
+
         self.channel_pos = np.load(
             os.path.join(self.ks_folder, "channel_positions.npy")
         )
@@ -232,6 +243,7 @@ class Curator(object):
             cluster_ids,
             self.times_multi,
             self.raw_data.data,
+            return_std=False,
             return_spikes=False,
         )
 
@@ -300,7 +312,11 @@ class Curator(object):
         if not os.path.exists(snr_path):
             logger.info("Calculating background standard deviation...")
             noise = extract_noise(
-                self.raw_data.data, self.spike_times, 20, 62, n_chan=self.n_channels
+                self.raw_data.data,
+                self.spike_times,
+                self.params["pre_samples"],
+                self.params["post_samples"],
+                n_chan=self.n_channels,
             )
             noise_stds = np.std(noise, axis=1)
             snrs = calc_SNR(self.mean_wf, noise_stds, self.cluster_ids)
@@ -341,9 +357,10 @@ class Curator(object):
         wf_path = os.path.join(self.ks_folder, "cluster_wf_shape.tsv")
         if not os.path.exists(wf_path):
             logger.info("Calculating waveform shape metrics...")
-            num_peaks, num_troughs, wf_durs, spat_decay, amplitude = (
-                calc_wf_shape_metrics(self.mean_wf, self.cluster_ids, self.channel_pos)
+            num_peaks, num_troughs, wf_durs, spat_decay = calc_wf_shape_metrics(
+                self.mean_wf, self.cluster_ids, self.channel_pos
             )
+            amplitude = np.max(self.mean_wf, 2) - np.min(self.mean_wf, 2)
             wf_df = pd.DataFrame(
                 {
                     "cluster_id": self.cluster_ids,
@@ -351,7 +368,7 @@ class Curator(object):
                     "n_troughs": num_troughs,
                     "wf_dur": wf_durs,
                     "spat_decay": spat_decay,
-                    "amplitude": amplitude,
+                    "amplitude": [amplitude[i, :] for i in self.cluster_ids],
                 }
             )
             wf_df.to_csv(wf_path, sep="\t")

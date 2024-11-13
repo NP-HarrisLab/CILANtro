@@ -43,12 +43,12 @@ class CuratorParams(Schema):
         fields.String,
         required=False,
         cli_as_single_argument=True,
-        missing=["good", "mua"],
+        missing=["good", "mua", "inc"],
         description="Cluster labels that denote non-noise clusters.",
     )
     max_spikes = fields.Int(
         required=False,
-        missing=500,
+        missing=1000,
         description="Maximum number of spikes per cluster used to calculate mean waveforms and cross projections. -1 uses all spikes.",
     )
 
