@@ -1,6 +1,8 @@
 import logging
 import sys
 
+from cilantropy.custom_metrics import custom_metrics
+
 logger = logging.getLogger("cilantropy")
 logger.setLevel(logging.DEBUG)
 
