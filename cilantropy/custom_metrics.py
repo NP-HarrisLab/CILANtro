@@ -2,14 +2,14 @@ import logging
 import os
 from typing import Tuple
 
-import burst_detector as bd
 import numpy as np
 import pandas as pd
-from burst_detector.schemas import CustomMetricsParams
+import slay
 from marshmallow import EXCLUDE
 from numpy.typing import NDArray
 from scipy import signal, stats
 from scipy.ndimage._filters import gaussian_filter1d
+from slay.schemas import CustomMetricsParams
 from tqdm import tqdm
 
 logger = logging.getLogger("burst-detector")
@@ -74,7 +74,7 @@ def custom_metrics(args: dict = None) -> None:
     """
     Calculate various metrics for spike sorting.
     """
-    args = bd.parse_kilosort_params(args)
+    args = slay.parse_kilosort_params(args)
     schema = CustomMetricsParams(unknown=EXCLUDE)
     params = schema.load(args)
 
@@ -91,7 +91,7 @@ def custom_metrics(args: dict = None) -> None:
     rawData = np.memmap(data_filepath, dtype=np.int16, mode="r")
     data = np.reshape(rawData, (int(rawData.size / n_chan), n_chan))
 
-    times_multi = bd.find_times_multi(
+    times_multi = slay.find_times_multi(
         times,
         clusters,
         np.arange(clusters.max() + 1),
@@ -105,7 +105,7 @@ def custom_metrics(args: dict = None) -> None:
     cl_good = np.zeros(n_clust, dtype=bool)
     cl_good[good_ids] = True
 
-    mean_wf, _, _ = bd.calc_mean_and_std_wf(
+    mean_wf, _, _ = slay.calc_mean_and_std_wf(
         params,
         n_clust,
         good_ids,
@@ -222,7 +222,7 @@ def calc_sliding_RP_viol(
         times = times_multi[clust_ids[i]] / 30000
         if times.shape[0] > 1:
             # calculate and avg halves of acg
-            acg = bd.auto_correlogram(times, 2, bin_size / 1000, 5 / 30000)
+            acg = slay.auto_correlogram(times, 2, bin_size / 1000, 5 / 30000)
             half_len = int(acg.shape[0] / 2)
             acg[half_len:] = (acg[half_len:] + acg[:half_len][::-1]) / 2
             acg = acg[half_len:]

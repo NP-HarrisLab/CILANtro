@@ -2,7 +2,7 @@ import os
 import re
 import shutil
 
-import burst_detector as bd
+import slay
 from ecephys_spike_sorting import sglx_pipeline
 from tqdm import tqdm
 
@@ -223,7 +223,7 @@ if __name__ == "__main__":
             ):
                 shutil.rmtree(os.path.join(ks_folder, "automerge"))
             if not os.path.exists(os.path.join(ks_folder, "automerge", "new2old.json")):
-                bd.run.main({"KS_folder": ks_folder, **params["merge_params"]})
+                slay.run.main({"KS_folder": ks_folder, **params["merge_params"]})
             else:
                 print("Merges already exists")
 

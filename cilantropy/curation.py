@@ -4,23 +4,17 @@ import logging
 import os
 from pathlib import Path
 
-import burst_detector as bd
 import cupy as cp
 import numpy as np
 import pandas as pd
+import slay
 from numpy.typing import NDArray
 
 import cilantropy.SGLXMetaToCoords as SGLXMeta
-from cilantropy.custom_metrics import (
-    calc_noise_cutoff,
-    calc_presence_ratio,
-    calc_sliding_RP_viol,
-    calc_SNR,
-    calc_wf_shape_metrics,
-    extract_noise,
-    noise_cutoff,
-    presence_ratio,
-)
+from cilantropy.custom_metrics import (calc_noise_cutoff, calc_presence_ratio,
+                                       calc_sliding_RP_viol, calc_SNR,
+                                       calc_wf_shape_metrics, extract_noise,
+                                       noise_cutoff, presence_ratio)
 from cilantropy.params import AutoCurateParams, CuratorParams
 from cilantropy.rawdata import RawData
 from cilantropy.utils import get_uVPerBit
@@ -158,7 +152,7 @@ class Curator(object):
         cluster_ids = np.unique(self.spike_clusters, return_counts=False)
         n_clusters = np.max(cluster_ids) + 1
 
-        self.times_multi = bd.find_times_multi(
+        self.times_multi = slay.find_times_multi(
             self.spike_times,
             self.spike_clusters,
             np.arange(n_clusters),
@@ -167,7 +161,7 @@ class Curator(object):
             self.params["post_samples"],
         )
 
-        self.mean_wf, self.std_wf, _ = bd.calc_mean_and_std_wf(
+        self.mean_wf, self.std_wf, _ = slay.calc_mean_and_std_wf(
             self.params,
             n_clusters,
             cluster_ids,
