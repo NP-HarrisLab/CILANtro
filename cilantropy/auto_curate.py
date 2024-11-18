@@ -164,7 +164,7 @@ if __name__ == "__main__":
         "folder": "E:\\T09\\20241022_T09_OF_Test1",  # 21 and Hab
         "ks_ver": "4",
         "ecephys_params": {
-            "overwrite": False,
+            "overwrite": True,
             "run_CatGT": True,
             "process_lf": True,
             "ni_present": False,
@@ -180,18 +180,17 @@ if __name__ == "__main__":
             "overwrite": False,
         },  # default
         "curator_params": {},  # default
-        "run_auto_curate": True,
-        "auto_curate_params": {},
-        "run_merge": True,
+        "run_auto_curate": False,
+        "auto_curate_params": {"save": True},  # default
+        "run_merge": False,
         "merge_params": {
             "overwrite": False,
             "plot_merges": False,
             "max_spikes": 500,
             "auto_accept_merges": True,
         },  # default
-        "run_auto_accept_merge": True,
-        "run_post_merge_curation": True,
-        "save_data": False,
+        "run_post_merge_curation": False,
+        "post_merge_curation_params": {"save": True},
     }
 
     ############################################################
@@ -229,7 +228,4 @@ if __name__ == "__main__":
                 print("Merges already exists")
 
         if params["run_post_merge_curation"]:
-            curator.post_merge_curation()
-
-        if params["save_data"]:
-            curator.save_data()
+            curator.post_merge_curation(params["post_merge_curation_params"])

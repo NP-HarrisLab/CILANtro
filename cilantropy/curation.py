@@ -127,11 +127,11 @@ class Curator(object):
         self.raw_data = RawData(self.params["data_path"], self.params["n_chan"])
         # load spike_clusters
         try:
-            spike_clusters = np.load(
+            self.spike_clusters = np.load(
                 os.path.join(self.ks_folder, "spike_clusters.npy")
             ).flatten()
         except FileNotFoundError:
-            spike_clusters = np.load(
+            self.spike_clusters = np.load(
                 os.path.join(self.ks_folder, "spike_templates.npy")
             ).flatten()
         self.spike_times = np.load(
@@ -150,12 +150,12 @@ class Curator(object):
         )
 
         # remove cluster_ids that are not in spike_clusters
-        cluster_ids = np.unique(spike_clusters, return_counts=False)
+        cluster_ids = np.unique(self.spike_clusters, return_counts=False)
         n_clusters = np.max(cluster_ids) + 1
 
         self.times_multi = bd.find_times_multi(
             self.spike_times,
-            spike_clusters,
+            self.spike_clusters,
             cluster_ids,
             self.raw_data.data,
             self.params["pre_samples"],
@@ -477,6 +477,9 @@ class Curator(object):
         )
         self.cluster_metrics.loc[low_spat_decay_units, "label"] = "noise"
 
+        if params["save"]:
+            self.save_data()
+
     def post_merge_curation(self, args: dict = {}) -> None:
         schema = AutoCurateParams()
         params = schema.load(args)
@@ -499,6 +502,9 @@ class Curator(object):
         self.cluster_metrics.loc[low_pr_units, "label_reason"] = "low presence ratio"
         self.cluster_metrics.loc[low_pr_units, "label"] = "inc"
 
+        if params["save"]:
+            self.save_data()
+
     def save_data(self) -> None:
         # save cluster_metrics in cilantro_metrics.tsv
         self.cluster_metrics.to_csv(
@@ -515,4 +521,21 @@ class Curator(object):
             index=False,
         )
 
-        # merge clusters will handle saving new
+        # save mean_wf
+        np.save(os.path.join(self.ks_folder, "mean_waveforms.npy"), self.mean_wf)
+
+        # save spike_clusters
+        np.save(
+            os.path.join(self.ks_folder, "spike_clusters.npy"),
+            self.calc_spike_clusters(),
+        )
+
+    def calc_spike_clusters(self) -> NDArray[np.uint32]:  # but says int32 in doc
+        # if new2old.json exists, update spike_clusters
+        if os.path.exists(os.path.join(self.ks_folder, "automerge", "new2old.json")):
+            with open(os.path.join(self.ks_folder, "automerge", "new2old.json")) as f:
+                new2old = json.load(f)
+                merges = {int(k): v for k, v in sorted(new2old.items())}
+            for new_id, old_ids in merges.items():
+                self.spike_clusters[np.isin(self.spike_clusters, old_ids)] = new_id
+        return self.spike_clusters
