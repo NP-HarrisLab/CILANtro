@@ -80,11 +80,11 @@ class Curator(object):
 
     @property
     def n_clusters(self) -> int:
-        return self.cluster_metrics["cluster_id"].iloc[-1] + 1
+        return self.cluster_metrics.index.iloc[-1] + 1
 
     @property
     def cluster_ids(self) -> NDArray:
-        return self.cluster_metrics["cluster_id"].values
+        return self.cluster_metrics.index.values
 
     @property
     def n_channels(self) -> int:
@@ -179,6 +179,7 @@ class Curator(object):
 
         self.cluster_metrics = pd.DataFrame()
         self.cluster_metrics["cluster_id"] = np.arange(n_clusters)
+        self.cluster_metrics.set_index("cluster_id", inplace=True)
 
         self.fill_dataframe()
         logger.info("\nCalculated metrics")
@@ -186,7 +187,9 @@ class Curator(object):
     def fill_dataframe(self) -> None:
         # load cluster_group.tsv
         cl_labels = pd.read_csv(
-            os.path.join(self.ks_folder, "cluster_group.tsv"), sep="\t"
+            os.path.join(self.ks_folder, "cluster_group.tsv"),
+            sep="\t",
+            index_col="cluster_id",
         )
         if "label" not in cl_labels.columns:
             try:
@@ -197,8 +200,7 @@ class Curator(object):
         # merge KSLabel and group columns
         self.cluster_metrics = pd.merge(
             self.cluster_metrics,
-            cl_labels[["cluster_id", "label"]],
-            on="cluster_id",
+            cl_labels["label"],
             how="left",
         )
         self.cluster_metrics["n_spikes"] = [
@@ -222,9 +224,10 @@ class Curator(object):
                 }
             )
             wf_df.to_csv(wf_path, sep="\t")
+            wf_df.set_index("cluster_id", inplace=True)
             logger.info("WF file saved.")
         else:
-            wf_df = pd.read_csv(wf_path, sep="\t")
+            wf_df = pd.read_csv(wf_path, sep="\t", index_col="cluster_id")
             if "spat_decays" in wf_df.columns:
                 wf_df.rename(columns={"spat_decays": "spat_decay"}, inplace=True)
                 wf_df.to_csv(wf_path, sep="\t", index=False)
@@ -240,7 +243,6 @@ class Curator(object):
         self.cluster_metrics = pd.merge(
             self.cluster_metrics,
             wf_df,
-            on="cluster_id",
             how="left",
         )
         # load J. Colonell's metrics.csv if it exists
@@ -271,7 +273,7 @@ class Curator(object):
                 amplitude[i, :] for i in self.cluster_ids
             ]
         else:
-            self.cluster_metrics["amplitude"] = self.cluster_metrics["cluster_id"].map(
+            self.cluster_metrics["amplitude"] = self.cluster_metrics.index.map(
                 metrics.set_index("cluster_id")["amplitude"]
             )
 
@@ -280,7 +282,7 @@ class Curator(object):
                 lambda x: np.argmax(x, axis=0)
             )
         else:
-            self.cluster_metrics["peak"] = self.cluster_metrics["cluster_id"].map(
+            self.cluster_metrics["peak"] = self.cluster_metrics.index.map(
                 metrics.set_index("cluster_id")["peak_channel"]
             )
 
@@ -289,9 +291,9 @@ class Curator(object):
                 len(self.raw_data.data) / self.params["sample_rate"]
             )
         else:
-            self.cluster_metrics["firing_rate"] = self.cluster_metrics[
-                "cluster_id"
-            ].map(metrics.set_index("cluster_id")["firing_rate"])
+            self.cluster_metrics["firing_rate"] = self.cluster_metrics.index.map(
+                metrics.set_index("cluster_id")["firing_rate"]
+            )
 
         if "snr" not in metrics.columns:
             # SNR
@@ -322,7 +324,7 @@ class Curator(object):
                     self.cluster_metrics, snr_df, on="cluster_id", how="outer"
                 )
         else:
-            self.cluster_metrics["SNR_good"] = self.cluster_metrics["cluster_id"].map(
+            self.cluster_metrics["SNR_good"] = self.cluster_metrics.index.map(
                 metrics.set_index("cluster_id")["snr"]
             )
             self.cluster_metrics["SNR_good"] = metrics["snr"]
@@ -339,42 +341,42 @@ class Curator(object):
                     {"cluster_id": self.cluster_ids, "slid_RP_viol": slid_rp_viols}
                 )
                 srv_df.to_csv(cluster_rp_path, sep="\t")
+                srv_df.set_index("cluster_id", inplace=True)
                 print("RP file saved.")
             else:
-                srv_df = pd.read_csv(cluster_rp_path, sep="\t")
+                srv_df = pd.read_csv(cluster_rp_path, sep="\t", index_col="cluster_id")
 
             if "slid_RP_viol" not in self.cluster_metrics.columns:
                 self.cluster_metrics = pd.merge(
-                    self.cluster_metrics, srv_df, on="cluster_id", how="outer"
+                    self.cluster_metrics, srv_df, how="outer"
                 )
         else:
-            self.cluster_metrics["slid_rp_viol"] = self.cluster_metrics[
-                "cluster_id"
-            ].map(metrics.set_index("cluster_id")["slideingRP_viol"])
+            self.cluster_metrics["slid_rp_viol"] = self.cluster_metrics.index.map(
+                metrics.set_index("cluster_id")["slideingRP_viol"]
+            )
 
         # noise cutoff
         if "nongauss_noise_cutoff" not in metrics.columns:
             logger.info("Calculating noise cutoff...")
             calc_noise_cutoff(self.cluster_metrics)
         else:
-            self.cluster_metrics["noise_cutoff"] = self.cluster_metrics[
-                "cluster_id"
-            ].map(metrics.set_index("cluster_id")["nongauss_noise_cutoff"])
+            self.cluster_metrics["noise_cutoff"] = self.cluster_metrics.index.map(
+                metrics.set_index("cluster_id")["nongauss_noise_cutoff"]
+            )
 
         # presence ratio
         if "presence_ratio" not in metrics.columns:
             logger.info("Calculating presence ratio...")
             calc_presence_ratio(self.cluster_metrics, self.times_multi)
         else:
-            self.cluster_metrics["presence_ratio"] = self.cluster_metrics[
-                "cluster_id"
-            ].map(metrics.set_index("cluster_id")["presence_ratio"])
+            self.cluster_metrics["presence_ratio"] = self.cluster_metrics.index.map(
+                metrics.set_index("cluster_id")["presence_ratio"]
+            )
 
         # if merged clusters after ecephys_spike_sorting, update values for new clusters
         if (
             not metrics.empty
-            and metrics.iloc[-1]["cluster_id"]
-            < self.cluster_metrics.iloc[-1]["cluster_id"]
+            and metrics.iloc[-1]["cluster_id"] < self.cluster_metrics.iloc[-1].index
         ):
             self.update_merged_metrics()
 
@@ -399,9 +401,7 @@ class Curator(object):
             cluster_labels["label_reason"] = ""
 
         for new_id, old_ids in merges.items():
-            old_rows = self.cluster_metrics[
-                self.cluster_metrics["cluster_id"].isin(old_ids)
-            ]
+            old_rows = self.cluster_metrics[old_ids]
             # add spike_times to times_multi
             # append until new_id is reached
             while len(self.times_multi) < new_id:
@@ -559,11 +559,12 @@ class Curator(object):
 
     def save_labels(self) -> None:
         # save new cluster_group.tsv
-        cluster_labels = self.cluster_metrics[["cluster_id", "label", "label_reason"]]
+        cluster_labels = self.cluster_metrics[["label", "label_reason"]]
         cluster_labels.to_csv(
             os.path.join(self.ks_folder, "cluster_group.tsv"),
             sep="\t",
-            index=False,
+            index=True,
+            index_label="cluster_id",
         )
 
     def calc_spike_clusters(self) -> NDArray[np.uint32]:  # but says int32 in doc
