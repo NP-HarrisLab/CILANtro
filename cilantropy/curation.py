@@ -1,3 +1,4 @@
+import atexit
 import json
 import logging
 import os
@@ -74,6 +75,7 @@ class Curator(object):
         self.mean_wf: NDArray
         self.std_wf: NDArray
         self.channel_pos: NDArray
+        atexit.register(self._cleanup)
         self._calc_metrics(**kwargs)
 
     @property
@@ -139,6 +141,9 @@ class Curator(object):
         ).flatten()
 
         # we do not need spike times outside of data (negative or positive). resave as uint32 to save space.
+        self.spike_clusters = self.spike_clusters[
+            (self.spike_times >= 0) & (self.spike_times < len(self.raw_data.data))
+        ]
         self.spike_times = self.spike_times[
             (self.spike_times >= 0) & (self.spike_times < len(self.raw_data.data))
         ].astype(np.uint32)
@@ -156,7 +161,7 @@ class Curator(object):
         self.times_multi = bd.find_times_multi(
             self.spike_times,
             self.spike_clusters,
-            cluster_ids,
+            np.arange(n_clusters),
             self.raw_data.data,
             self.params["pre_samples"],
             self.params["post_samples"],
@@ -176,13 +181,29 @@ class Curator(object):
         self.cluster_metrics["cluster_id"] = np.arange(n_clusters)
 
         self.fill_dataframe()
-        logger.info("Calculated metrics")
+        logger.info("\nCalculated metrics")
 
     def fill_dataframe(self) -> None:
-        self.cluster_metrics["spike_times"] = self.times_multi
-        self.cluster_metrics["n_spikes"] = self.cluster_metrics["spike_times"].apply(
-            len
+        # load cluster_group.tsv
+        cl_labels = pd.read_csv(
+            os.path.join(self.ks_folder, "cluster_group.tsv"), sep="\t"
         )
+        if "label" not in cl_labels.columns:
+            try:
+                cl_labels["label"] = cl_labels["KSLabel"]
+            except KeyError:
+                cl_labels["label"] = cl_labels["group"]
+
+        # merge KSLabel and group columns
+        self.cluster_metrics = pd.merge(
+            self.cluster_metrics,
+            cl_labels[["cluster_id", "label"]],
+            on="cluster_id",
+            how="left",
+        )
+        self.cluster_metrics["n_spikes"] = [
+            len(self.times_multi[i]) for i in self.cluster_ids
+        ]
 
         # cluster waveform shapes
         wf_path = os.path.join(self.ks_folder, "cluster_wf_shape.tsv")
@@ -343,7 +364,7 @@ class Curator(object):
         # presence ratio
         if "presence_ratio" not in metrics.columns:
             logger.info("Calculating presence ratio...")
-            calc_presence_ratio(self.cluster_metrics)
+            calc_presence_ratio(self.cluster_metrics, self.times_multi)
         else:
             self.cluster_metrics["presence_ratio"] = self.cluster_metrics[
                 "cluster_id"
@@ -354,33 +375,47 @@ class Curator(object):
             not metrics.empty
             and metrics.iloc[-1]["cluster_id"]
             < self.cluster_metrics.iloc[-1]["cluster_id"]
-            and os.path.exists(
-                os.path.join(self.ks_folder, "automerge", "new2old.json")
-            )
         ):
             self.update_merged_metrics()
 
     def update_merged_metrics(self) -> None:
         # update any cluster_metrics that were merged
-        with open(os.path.join(self.ks_folder, "automerge", "new2old.json")) as f:
-            new2old = json.load(f)
-            merges = {int(k): v for k, v in sorted(new2old.items())}
+        try:
+            with open(os.path.join(self.ks_folder, "automerge", "new2old.json")) as f:
+                new2old = json.load(f)
+                merges = {int(k): v for k, v in sorted(new2old.items())}
+        except FileNotFoundError as e:
+            print(e)
+            return
+
+        # update mean_wf and cluster_labels
+        self.mean_wf = np.load(os.path.join(self.ks_folder, "mean_waveforms.npy"))
+        cluster_labels = pd.read_csv(
+            os.path.join(self.ks_folder, "cluster_group.tsv"),
+            sep="\t",
+            index_col="cluster_id",
+        )
+        if "label_reason" not in cluster_labels.columns:
+            cluster_labels["label_reason"] = ""
+
         for new_id, old_ids in merges.items():
             old_rows = self.cluster_metrics[
                 self.cluster_metrics["cluster_id"].isin(old_ids)
             ]
+            # add spike_times to times_multi
+            # append until new_id is reached
+            while len(self.times_multi) < new_id:
+                self.times_multi.append(np.array([]))
+            self.times_multi.append(
+                np.concatenate(
+                    [self.times_multi[old_ids[i]] for i in range(len(old_ids))]
+                )
+            )
+            # make old times to empty
+            for i in range(len(old_ids)):
+                self.times_multi[old_ids[i]] = np.array([])
 
             # amplitude
-            try:
-                new_mean_wf = self.mean_wf[new_id]
-            except IndexError:
-                # weighted mean of old waveforms
-                new_mean_wf = np.sum(
-                    [self.mean_wf[i] * self.counts[i] for i in old_ids], axis=0
-                ) / np.sum(self.counts[old_ids])
-                while len(self.mean_wf) < new_id:
-                    self.mean_wf = np.vstack([self.mean_wf, np.zeros_like(new_mean_wf)])
-                self.mean_wf = np.vstack([self.mean_wf, new_mean_wf])
             meta_path = self.params["data_path"].replace(".bin", ".meta")
             meta = SGLXMeta.readMeta(Path(meta_path))
 
@@ -392,33 +427,52 @@ class Curator(object):
                     probe_type = "NP" + pType
             else:
                 probe_type = "3A"  # 3A probe is default
-            new_amplitude = np.max(new_mean_wf, 2) - np.min(
-                new_mean_wf, 2
-            ) * get_uVPerBit(meta, meta_path, probe_type)
-            self.cluster_metrics.loc[new_id, "amplitude"] = new_amplitude
+
+            new_amplitude = (
+                np.max(self.mean_wf[new_id], 1)
+                - np.min(self.mean_wf[new_id], 1)
+                * get_uVPerBit(meta, meta_path, probe_type)
+            ).flatten()
 
             # peak
-            self.cluster_metrics["peak"] = np.argmax(new_amplitude, axis=0)
+            peak = np.argmax(new_amplitude, axis=0)
 
             # SNR_good
-            self.cluster_metrics.loc[new_id, "SNR_good"] = np.sum(
-                old_rows["SNR_good"] * old_rows["n_spikes"]
-            ) / np.sum(old_rows["n_spikes"])
+            snr = np.sum(old_rows["SNR_good"] * old_rows["n_spikes"]) / np.sum(
+                old_rows["n_spikes"]
+            )
 
             # slid_RP_viol
-            self.cluster_metrics.loc[new_id, "slid_rp_viol"] = calc_sliding_RP_viol(
-                self.times_multi, [new_id], self.n_clusters
-            )
+            slid_rp_viol = calc_sliding_RP_viol(self.times_multi, [new_id], 1)[0]
 
             # noise_cutoff
-            self.cluster_metrics.loc[new_id, "noise_cutoff"] = noise_cutoff(
-                new_amplitude
-            )
+            # TODO: fix me using amplitudes of spikes
+            _, nc, _ = noise_cutoff(new_amplitude)
 
             # presence_ratio
-            self.cluster_metrics.loc[new_id, "presence_ratio"] = presence_ratio(
-                self.cluster_metrics.loc[new_id, "spike_times"]
+            pr = presence_ratio(self.times_multi[new_id])
+
+            # firing rate
+            fr = np.sum(old_rows["n_spikes"]) / (
+                len(self.raw_data.data) / self.params["sample_rate"]
             )
+
+            new_row = pd.DataFrame(
+                {
+                    "cluster_id": new_id,
+                    "label": cluster_labels.loc[new_id, "label"],
+                    "label_reason": cluster_labels.loc[new_id, "label_reason"],
+                    "n_spikes": old_rows["n_spikes"].sum(),
+                    "firing_rate": fr,
+                    "SNR_good": snr,
+                    "slid_RP_viol": slid_rp_viol,
+                    "noise_cutoff": nc,
+                    "presence_ratio": pr,
+                    "peak": peak,
+                    "amplitude": [new_amplitude],
+                }
+            )
+            self.cluster_metrics = pd.concat([self.cluster_metrics, new_row])
 
     def auto_curate(self, args: dict = {}) -> None:
         schema = AutoCurateParams()
@@ -477,8 +531,7 @@ class Curator(object):
         )
         self.cluster_metrics.loc[low_spat_decay_units, "label"] = "noise"
 
-        if params["save"]:
-            self.save_data()
+        self.save_labels()
 
     def post_merge_curation(self, args: dict = {}) -> None:
         schema = AutoCurateParams()
@@ -502,32 +555,15 @@ class Curator(object):
         self.cluster_metrics.loc[low_pr_units, "label_reason"] = "low presence ratio"
         self.cluster_metrics.loc[low_pr_units, "label"] = "inc"
 
-        if params["save"]:
-            self.save_data()
+        self.save_labels()
 
-    def save_data(self) -> None:
-        # save cluster_metrics in cilantro_metrics.tsv
-        self.cluster_metrics.to_csv(
-            os.path.join(self.ks_folder, "cilantro_metrics.tsv"),
-            sep="\t",
-            index=False,
-        )
-
+    def save_labels(self) -> None:
         # save new cluster_group.tsv
-        cluster_labels = self.cluster_metrics[["cluster_id", "label"]]
+        cluster_labels = self.cluster_metrics[["cluster_id", "label", "label_reason"]]
         cluster_labels.to_csv(
             os.path.join(self.ks_folder, "cluster_group.tsv"),
             sep="\t",
             index=False,
-        )
-
-        # save mean_wf
-        np.save(os.path.join(self.ks_folder, "mean_waveforms.npy"), self.mean_wf)
-
-        # save spike_clusters
-        np.save(
-            os.path.join(self.ks_folder, "spike_clusters.npy"),
-            self.calc_spike_clusters(),
         )
 
     def calc_spike_clusters(self) -> NDArray[np.uint32]:  # but says int32 in doc
@@ -539,3 +575,11 @@ class Curator(object):
             for new_id, old_ids in merges.items():
                 self.spike_clusters[np.isin(self.spike_clusters, old_ids)] = new_id
         return self.spike_clusters
+
+    def _cleanup(self):
+        # save cluster_metrics in cilantro_metrics.tsv
+        self.cluster_metrics.to_csv(
+            os.path.join(self.ks_folder, "cilantro_metrics.tsv"),
+            sep="\t",
+            index=False,
+        )

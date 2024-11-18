@@ -164,7 +164,7 @@ if __name__ == "__main__":
         "folder": "E:\\T09\\20241022_T09_OF_Test1",  # 21 and Hab
         "ks_ver": "4",
         "ecephys_params": {
-            "overwrite": True,
+            "overwrite": False,
             "run_CatGT": True,
             "process_lf": True,
             "ni_present": False,
@@ -180,16 +180,16 @@ if __name__ == "__main__":
             "overwrite": False,
         },  # default
         "curator_params": {},  # default
-        "run_auto_curate": False,
+        "run_auto_curate": True,
         "auto_curate_params": {"save": True},  # default
-        "run_merge": False,
+        "run_merge": True,
         "merge_params": {
             "overwrite": False,
             "plot_merges": False,
             "max_spikes": 500,
             "auto_accept_merges": True,
         },  # default
-        "run_post_merge_curation": False,
+        "run_post_merge_curation": True,
         "post_merge_curation_params": {"save": True},
     }
 

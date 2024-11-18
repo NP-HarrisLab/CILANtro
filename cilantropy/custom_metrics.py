@@ -218,8 +218,8 @@ def calc_sliding_RP_viol(
 
     RP_conf = np.zeros(n_clust, dtype=np.float32)
 
-    for i in tqdm(clust_ids, desc="Calculating RP viol confs"):
-        times = times_multi[i] / 30000
+    for i in tqdm(range(len(clust_ids)), desc="Calculating RP viol confs"):
+        times = times_multi[clust_ids[i]] / 30000
         if times.shape[0] > 1:
             # calculate and avg halves of acg
             acg = bd.auto_correlogram(times, 2, bin_size / 1000, 5 / 30000)
@@ -451,7 +451,7 @@ def noise_cutoff(
     return nc_pass, cutoff, first_low_quantile
 
 
-def calc_presence_ratio(cluster_metrics, num_bins=100):
+def calc_presence_ratio(cluster_metrics, times_multi, num_bins=100):
     # adapted from https://github.com/AllenInstitute/ecephys_spike_sorting/blob/archive/ecephys_spike_sorting/modules/quality_metrics/metrics.py
     # add column for presence ratio if it doesn't exist
     if "presence_ratio" not in cluster_metrics.columns:
@@ -459,7 +459,7 @@ def calc_presence_ratio(cluster_metrics, num_bins=100):
 
     for cluster in tqdm(cluster_metrics.index, desc="Calculating presence ratios"):
         if pd.isna(cluster_metrics.loc[cluster, "presence_ratio"]):
-            spike_times = cluster_metrics.loc[cluster, "spike_times"]
+            spike_times = times_multi[cluster]
             pr = presence_ratio(spike_times, num_bins)
             cluster_metrics.loc[cluster, "presence_ratio"] = pr
     return cluster_metrics
@@ -472,3 +472,4 @@ def presence_ratio(spike_times, num_bins=100):
         hist, _ = np.histogram(spike_times, np.linspace(min_time, max_time, num_bins))
         pr = np.sum(hist > 0) / num_bins
         return pr
+    return np.nan
