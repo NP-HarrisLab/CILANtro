@@ -153,7 +153,7 @@ def run_custom_metrics(ks_folder, args):
     if not args["overwrite"] and all(os.path.exists(path) for path in paths):
         tqdm.write(f"Custom metrics already exist for {ks_folder}")
         return
-    print(f"Running custom metrics for {ks_folder}")
+    tqdm.write(f"Running custom metrics for {ks_folder}")
     args["KS_folder"] = ks_folder
     cilantropy.custom_metrics(args)
 
@@ -181,7 +181,7 @@ if __name__ == "__main__":
         },  # default
         "curator_params": {},  # default
         "run_auto_curate": True,
-        "auto_curate_params": {"save": True},  # default
+        "auto_curate_params": {},  # default
         "run_merge": True,
         "merge_params": {
             "overwrite": False,
@@ -190,7 +190,7 @@ if __name__ == "__main__":
             "auto_accept_merges": True,
         },  # default
         "run_post_merge_curation": True,
-        "post_merge_curation_params": {"save": True},
+        "post_merge_curation_params": {},
     }
 
     ############################################################
@@ -207,8 +207,9 @@ if __name__ == "__main__":
         sglx_pipeline.main(info)
 
     ks_folders = get_ks_folders(params["folder"], params["ks_ver"])
-    for ks_folder in tqdm(ks_folders):
-        tqdm.write(f"Processing {ks_folder}")
+    pbar = tqdm(ks_folders, "Processing Kilosort folders...")
+    for ks_folder in pbar:
+        pbar.set_description(f"Processing {ks_folder}")
 
         if params["run_custom_metrics"]:
             run_custom_metrics(ks_folder, params["custom_metrics_params"])
@@ -225,7 +226,7 @@ if __name__ == "__main__":
             if not os.path.exists(os.path.join(ks_folder, "automerge", "new2old.json")):
                 bd.run.main({"KS_folder": ks_folder, **params["merge_params"]})
             else:
-                print("Merges already exists")
+                tqdm.write("Merges already exists")
 
         if params["run_post_merge_curation"]:
             curator.post_merge_curation(params["post_merge_curation_params"])

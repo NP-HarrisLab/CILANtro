@@ -1,4 +1,3 @@
-import logging
 import os
 from typing import Tuple
 
@@ -9,10 +8,7 @@ from burst_detector.schemas import CustomMetricsParams
 from marshmallow import EXCLUDE
 from numpy.typing import NDArray
 from scipy import signal, stats
-from scipy.ndimage._filters import gaussian_filter1d
 from tqdm import tqdm
-
-logger = logging.getLogger("burst-detector")
 
 
 # --------------------------------------------- DATA HANDLING HELPERS -------------------------------------------------
@@ -115,7 +111,7 @@ def custom_metrics(args: dict = None) -> None:
         return_spikes=False,
     )
 
-    logger.info("Calculating background standard deviation...")
+    tqdm.write("Calculating background standard deviation...")
     noise = extract_noise(
         data, times, params["pre_samples"], params["post_samples"], n_chan
     )
@@ -163,7 +159,7 @@ def calc_SNR(
     - snrs (NDArray): Array of shape (n_waveforms,) representing the SNR for each waveform.
     """
 
-    logger.info("Calculating peak channels and amplitudes")
+    tqdm.write("Calculating peak channels and amplitudes")
     # calculate peak chans, amplitudes
     peak_chans = np.argmax(np.max(np.abs(mean_wf), axis=-1), axis=-1)
     peak_chans[peak_chans == 384] = 383  # TODO hacky fix
@@ -323,85 +319,18 @@ def calc_wf_shape_metrics(
     return num_peaks, num_troughs, wf_durs, spat_decays
 
 
-def calc_amplitude_cutoff(cluster_metrics, num_bins=500, smoothing_factor=3):
-    # adapted from https://github.com/AllenInstitute/ecephys_spike_sorting/blob/archive/ecephys_spike_sorting/modules/quality_metrics/metrics.py
-    # add column for amplitude cutoff if it doesn't exist
-    if "amplitude_cutoff" not in cluster_metrics.columns:
-        cluster_metrics["amplitude_cutoff"] = pd.NA
+def calculate_noise_cutoff(spikes, peak, cluster_ids, total_units):
+    cutoff = np.zeros((total_units,))
 
-    # calculate amplitude cutoff for each cluster if it is not already calculated
-    for cluster in tqdm(cluster_metrics.index, desc="Calculating amplitude cutoffs"):
-        if pd.isna(cluster_metrics.loc[cluster, "amplitude_cutoff"]):
-            amplitudes = cluster_metrics.loc[cluster, "amplitude"]
-            hist, bin_edges = np.histogram(amplitudes, num_bins, density=True)
-            pdf = gaussian_filter1d(hist, smoothing_factor)
-            support = bin_edges[:-1]
-            peak_idx = np.argmax(pdf)
-            G = np.argmin(np.abs(pdf[peak_idx:] - pdf[0])) + peak_idx
-            bin_size = np.mean(np.diff(support))
-            fraction_missing = np.sum(pdf[G:]) * bin_size
-            fraction_missing = np.min([fraction_missing, 0.5])
-            cluster_metrics.loc[cluster, "amplitude_cutoff"] = fraction_missing
-    return cluster_metrics
+    for cluster_id in tqdm(cluster_ids, desc="Calculating noise cutoffs"):
+        # get amplitudes for spike_times
+        cl_spikes = spikes[cluster_id][:, peak[cluster_id], :]
+        spike_amps = np.ptp(cl_spikes, axis=1)
+        cutoff[cluster_id] = noise_cutoff(amps=spike_amps)[
+            1
+        ]  # TODO can return others if we want
 
-
-def calc_noise_cutoff(
-    cluster_metrics,
-    quantile_length=0.25,
-    n_bins=100,
-    nc_threshold=5,
-    percent_threshold=0.10,
-):
-    """
-    Adapted from J. Colonell's ecephys_spike_sorting code.
-    A new metric to determine whether a unit's amplitude distribution is cut off
-    (at floor), without assuming a Gaussian distribution.
-    This metric takes the amplitude distribution, computes the mean and std
-    of an upper quartile of the distribution, and determines how many standard
-    deviations away from that mean a lower quartile lies.
-    Parameters
-    ----------
-    custom_metrics : dataframe
-        The amplitudes (in uV) of the spikes.
-    quantile_length : float
-        The size of the upper quartile of the amplitude distribution.
-    n_bins : int
-        The number of bins used to compute a histogram of the amplitude
-        distribution.
-    n_low_bins : int
-        The number of bins used in the lower part of the distribution (where
-        cutoff is determined).
-     nc_threshold: float
-        the noise cutoff result has to be lower than this for a neuron to fail
-    percent_threshold: float
-        the first bin has to be greater than percent_threshold for neuron the to fail
-    Returns
-    -------
-    cutoff : float
-        Number of standard deviations that the lower mean is outside of the
-        mean of the upper quartile.
-    See Also
-    --------
-    missed_spikes_est
-    Examples
-    --------
-    1) Compute whether a unit's amplitude distribution is cut off
-        >>> amps = spks_b['amps'][unit_idxs]
-        >>> cutoff = bb.metrics.noise_cutoff(amps, quantile_length=.25, n_bins=100)
-    """
-    if "noise_cutoff" not in cluster_metrics.columns:
-        cluster_metrics["noise_cutoff"] = pd.NA
-
-    for cluster in tqdm(cluster_metrics.index, desc="Calculating noise cutoffs"):
-        if pd.isna(cluster_metrics.loc[cluster, "noise_cutoff"]):
-            _, cutoff, _ = noise_cutoff(
-                cluster_metrics.loc[cluster, "amplitude"],
-                quantile_length,
-                n_bins,
-                nc_threshold,
-                percent_threshold,
-            )
-            cluster_metrics.loc[cluster, "noise_cutoff"] = cutoff
+    return cutoff
 
 
 def noise_cutoff(

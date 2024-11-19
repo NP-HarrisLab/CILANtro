@@ -36,7 +36,6 @@ import scipy.io
 def readMeta(metaPath):
     metaDict = {}
     if metaPath.exists():
-        # print("meta file present")
         with metaPath.open() as f:
             mdatList = f.read().splitlines()
             # convert the list entries into key value pairs
