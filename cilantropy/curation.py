@@ -3,10 +3,10 @@ import json
 import os
 from pathlib import Path
 
-import burst_detector as bd
 import cupy as cp
 import numpy as np
 import pandas as pd
+import slay
 from numpy.typing import NDArray
 from tqdm import tqdm
 
@@ -155,7 +155,7 @@ class Curator(object):
         cluster_ids = np.unique(self.spike_clusters, return_counts=False)
         n_clusters = np.max(cluster_ids) + 1
 
-        self.times_multi = bd.find_times_multi(
+        self.times_multi = slay.find_times_multi(
             self.spike_times,
             self.spike_clusters,
             np.arange(n_clusters),
@@ -164,7 +164,7 @@ class Curator(object):
             self.params["post_samples"],
         )
 
-        self.mean_wf, _, self.spikes = bd.calc_mean_and_std_wf(
+        self.mean_wf, _, self.spikes = slay.calc_mean_and_std_wf(
             self.params,
             n_clusters,
             cluster_ids,
@@ -365,7 +365,10 @@ class Curator(object):
         if "nongauss_noise_cutoff" not in metrics.columns:
             tqdm.write("Calculating noise cutoff...")
             nc = calculate_noise_cutoff(
-                self.spikes, self.cluster_metrics["peak"].values, self.cluster_ids, self.n_clusters
+                self.spikes,
+                self.cluster_metrics["peak"].values,
+                self.cluster_ids,
+                self.n_clusters,
             )
             self.cluster_metrics["noise_cutoff"] = nc
 
