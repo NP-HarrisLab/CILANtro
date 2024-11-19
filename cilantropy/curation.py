@@ -363,7 +363,6 @@ class Curator(object):
 
         # noise cutoff
         if "nongauss_noise_cutoff" not in metrics.columns:
-            tqdm.write("Calculating noise cutoff...")
             nc = calculate_noise_cutoff(
                 self.spikes,
                 self.cluster_metrics["peak"].values,
@@ -384,7 +383,6 @@ class Curator(object):
 
         # presence ratio
         if "presence_ratio" not in metrics.columns:
-            tqdm.write("Calculating presence ratio...")
             calc_presence_ratio(self.cluster_metrics, self.times_multi)
         else:
             self.cluster_metrics = self.cluster_metrics.join(metrics["presence_ratio"])

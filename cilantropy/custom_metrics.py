@@ -324,7 +324,11 @@ def calculate_noise_cutoff(spikes, peak, cluster_ids, total_units):
 
     for cluster_id in tqdm(cluster_ids, desc="Calculating noise cutoffs"):
         # get amplitudes for spike_times
-        cl_spikes = spikes[cluster_id][:, peak[cluster_id], :]
+        try:
+            cl_spikes = spikes[cluster_id][:, peak[cluster_id], :]
+        except KeyError:
+            cutoff[cluster_id] = np.nan
+            continue
         spike_amps = np.ptp(cl_spikes, axis=1)
         cutoff[cluster_id] = noise_cutoff(amps=spike_amps)[
             1
