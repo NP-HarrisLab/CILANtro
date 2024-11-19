@@ -130,9 +130,10 @@ def get_ecephys_params(npx_directory, run_dir, ks_ver, params):
 
 def get_ks_folders(root_dir, ks_ver):
     root_dir = os.path.abspath(root_dir)
+    catgt_folder = os.path.join(os.path.dirname(root_dir), "catgt_"+os.path.basename(root_dir))
     pattern = re.compile(r"imec\d_ks\d+")
     matching_folders = []
-    for root, dirs, _ in os.walk(root_dir):
+    for root, dirs, _ in os.walk(catgt_folder):
         if "$RECYCLE.BIN" in root:
             continue
         for dir in dirs:
@@ -161,14 +162,14 @@ def run_custom_metrics(ks_folder, args):
 if __name__ == "__main__":
     # SET PARAMETERS ############################################
     params = {
-        "folder": "E:\\T09\\20241022_T09_OF_Test1",  # 21 and Hab
-        "ks_ver": "4",
+        "folder": r"C:\Users\alexc\Desktop\Wu_Sleep_Recordings\20241006_SD1_test_1500_g0",  # 21 and Hab
+        "ks_ver": "25",
         "ecephys_params": {
             "overwrite": False,
             "run_CatGT": True,
-            "process_lf": True,
+            "process_lf": False,
             "ni_present": False,
-            "runTPrime": True,
+            "runTPrime": False,
             "run_kilosort": True,
             "run_kilosort_postprocessing": True,
             "run_noise_templates": False,
@@ -180,9 +181,9 @@ if __name__ == "__main__":
             "overwrite": False,
         },  # default
         "curator_params": {},  # default
-        "run_auto_curate": True,
-        "auto_curate_params": {},  # default
-        "run_merge": True,
+        "run_auto_curate": False,
+        "auto_curate_params": {"save": True},  # default
+        "run_merge": False,
         "merge_params": {
             "overwrite": False,
             "plot_merges": False,
@@ -190,7 +191,7 @@ if __name__ == "__main__":
             "auto_accept_merges": True,
         },  # default
         "run_post_merge_curation": True,
-        "post_merge_curation_params": {},
+        "post_merge_curation_params": {"save": True},
     }
 
     ############################################################
@@ -198,18 +199,18 @@ if __name__ == "__main__":
     run_info = get_run_info(
         params["folder"], params["ks_ver"], params["ecephys_params"]
     )
-    # sort by date
-    run_info = sorted(run_info, key=lambda x: x["run_name"])
+    if run_info[0]:
+        # sort by date
+        run_info = sorted(run_info, key=lambda x: x["run_name"])
 
-    # run ecephys_spike_sorting
-    for info in tqdm(run_info, "Processing runs..."):
-        # join run_info and ecephys_params
-        sglx_pipeline.main(info)
+        # run ecephys_spike_sorting
+        for info in tqdm(run_info, "Processing runs..."):
+            # join run_info and ecephys_params
+            sglx_pipeline.main(info)
 
-    ks_folders = get_ks_folders(params["folder"], params["ks_ver"])
-    pbar = tqdm(ks_folders, "Processing Kilosort folders...")
-    for ks_folder in pbar:
-        pbar.set_description(f"Processing {ks_folder}")
+    ks_folders = get_ks_folders( params["folder"], params["ks_ver"])
+    for ks_folder in tqdm(ks_folders):
+        tqdm.write(f"Processing {ks_folder}")
 
         if params["run_custom_metrics"]:
             run_custom_metrics(ks_folder, params["custom_metrics_params"])
