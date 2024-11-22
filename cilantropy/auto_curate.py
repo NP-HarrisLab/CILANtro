@@ -168,7 +168,7 @@ def run_custom_metrics(ks_folder, args):
 if __name__ == "__main__":
     # SET PARAMETERS ############################################
     params = {
-        "folder": "E:\\",
+        "folder": "D:\\",
         "ks_ver": "4",
         "ecephys_params": {
             "overwrite": False,
@@ -186,9 +186,9 @@ if __name__ == "__main__":
             "overwrite": False,
         },  # default
         "curator_params": {},  # default
-        "run_auto_curate": False,
+        "run_auto_curate": True,
         "auto_curate_params": {"save": True},  # default
-        "run_merge": False,
+        "run_merge": True,
         "merge_params": {
             "overwrite": False,
             "plot_merges": False,

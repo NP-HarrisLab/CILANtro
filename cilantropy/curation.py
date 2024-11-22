@@ -163,6 +163,9 @@ class Curator(object):
             self.params["pre_samples"],
             self.params["post_samples"],
         )
+        cluster_ids = [
+            i for i in cluster_ids if len(self.times_multi[i]) > 0
+        ]  # fix cluster ids if no spikes in bounds
 
         self.mean_wf, _, self.spikes = slay.calc_mean_and_std_wf(
             self.params,
@@ -470,7 +473,7 @@ class Curator(object):
             slid_rp_viol = calc_sliding_RP_viol(self.times_multi, [new_id], 1)[0]
 
             # noise_cutoff
-            sp_amplitudes = np.ptp(self.spikes[new_id])
+            sp_amplitudes = np.ptp(self.spikes[new_id], 1)
             _, nc, _ = noise_cutoff(sp_amplitudes)
 
             # presence_ratio
@@ -514,7 +517,8 @@ class Curator(object):
 
         # mark low snr units as noise
         low_snr_units = self.cluster_metrics[
-            self.cluster_metrics["SNR_good"] < params["min_snr"]
+            (self.cluster_metrics["SNR_good"] < params["min_snr"])
+            & (self.cluster_metrics["label"].isin(params["good_lbls"]))
         ].index
         self.cluster_metrics.loc[low_snr_units, "label_reason"] = "low SNR"
         self.cluster_metrics.loc[low_snr_units, "label"] = "noise"
@@ -529,13 +533,15 @@ class Curator(object):
 
         # mark units with too many peaks and troughs as noise
         high_peaks_units = self.cluster_metrics[
-            self.cluster_metrics["n_peaks"] > params["max_peaks"]
+            (self.cluster_metrics["n_peaks"] > params["max_peaks"])
+            & (self.cluster_metrics["label"].isin(params["good_lbls"]))
         ].index
         self.cluster_metrics.loc[high_peaks_units, "label_reason"] = "too many peaks"
         self.cluster_metrics.loc[high_peaks_units, "label"] = "noise"
 
         high_troughs_units = self.cluster_metrics[
-            self.cluster_metrics["n_troughs"] > params["max_troughs"]
+            (self.cluster_metrics["n_troughs"] > params["max_troughs"])
+            & (self.cluster_metrics["label"].isin(params["good_lbls"]))
         ].index
         self.cluster_metrics.loc[high_troughs_units, "label_reason"] = (
             "too many troughs"
@@ -544,14 +550,16 @@ class Curator(object):
 
         # mark units with long waveform duration as noise
         long_wf_units = self.cluster_metrics[
-            self.cluster_metrics["wf_dur"] > params["max_wf_dur"]
+            (self.cluster_metrics["wf_dur"] > params["max_wf_dur"])
+            & (self.cluster_metrics["label"].isin(params["good_lbls"]))
         ].index
         self.cluster_metrics.loc[long_wf_units, "label_reason"] = "long waveform"
         self.cluster_metrics.loc[long_wf_units, "label"] = "noise"
 
         # mark units with low spatial decay as noise
         low_spat_decay_units = self.cluster_metrics[
-            self.cluster_metrics["spat_decay"] < params["min_spat_decay"]
+            (self.cluster_metrics["spat_decay"] < params["min_spat_decay"])
+            & (self.cluster_metrics["label"].isin(params["good_lbls"]))
         ].index
         self.cluster_metrics.loc[low_spat_decay_units, "label_reason"] = (
             "low spatial decay"
