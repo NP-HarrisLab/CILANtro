@@ -136,10 +136,10 @@ def get_ecephys_params(npx_directory, run_dir, ks_ver, params):
 
 def get_ks_folders(root_dir, ks_ver):
     root_dir = os.path.abspath(root_dir)
-    catgt_folder = os.path.join(os.path.dirname(root_dir), "catgt_"+os.path.basename(root_dir))
+    # catgt_folder = os.path.join(os.path.dirname(root_dir), "catgt_"+os.path.basename(root_dir))
     pattern = re.compile(r"imec\d_ks\d+")
     matching_folders = []
-    for root, dirs, _ in os.walk(catgt_folder):
+    for root, dirs, _ in os.walk(root_dir):
         if "$RECYCLE.BIN" in root:
             continue
         for dir in dirs:

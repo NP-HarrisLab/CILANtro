@@ -134,12 +134,12 @@ class Curator(object):
         ).flatten()
 
         # we do not need spike times outside of data (negative or positive). resave as uint32 to save space.
-        outside_spikes_idx = (self.spike_times >= 0) & (
+        good_spikes = (self.spike_times >= 0) & (
             self.spike_times < len(self.raw_data.data)
         )
-        if outside_spikes_idx.any():
-            self.spike_clusters = self.spike_clusters[np.argwhere(outside_spikes_idx).flatten()]
-            self.spike_times = self.spike_times[np.argwhere(outside_spikes_idx).flatten()].astype(np.uint32)
+        if not good_spikes.all():
+            self.spike_clusters = self.spike_clusters[good_spikes]
+            self.spike_times = self.spike_times[good_spikes].astype(np.uint32)
             # resave spike_clusters
             np.save(
                 os.path.join(self.ks_folder, "spike_clusters.npy"), self.spike_clusters
@@ -396,7 +396,6 @@ class Curator(object):
 
         tqdm.write("Calculated metrics")
 
-    #TODO: update n_spikes for old clusters that got merged
     def update_merged_metrics(self) -> None:
         # update any cluster_metrics that were merged
         try:
@@ -530,13 +529,13 @@ class Curator(object):
 
         # mark units with too many peaks and troughs as noise
         high_peaks_units = self.cluster_metrics[
-            self.cluster_metrics["num_peaks"] > params["max_peaks"]
+            self.cluster_metrics["n_peaks"] > params["max_peaks"]
         ].index
         self.cluster_metrics.loc[high_peaks_units, "label_reason"] = "too many peaks"
         self.cluster_metrics.loc[high_peaks_units, "label"] = "noise"
 
         high_troughs_units = self.cluster_metrics[
-            self.cluster_metrics["num_troughs"] > params["max_troughs"]
+            self.cluster_metrics["n_troughs"] > params["max_troughs"]
         ].index
         self.cluster_metrics.loc[high_troughs_units, "label_reason"] = (
             "too many troughs"
@@ -552,7 +551,7 @@ class Curator(object):
 
         # mark units with low spatial decay as noise
         low_spat_decay_units = self.cluster_metrics[
-            self.cluster_metrics["spat_decays"] < params["min_spat_decay"]
+            self.cluster_metrics["spat_decay"] < params["min_spat_decay"]
         ].index
         self.cluster_metrics.loc[low_spat_decay_units, "label_reason"] = (
             "low spatial decay"
