@@ -101,7 +101,7 @@ class AutoCurateParams(Schema):
     )
     max_noise_cutoff = fields.Float(
         required=False,
-        missing=0.5,
+        missing=5,
         description="Maximum noise cutoff for a cluster, otherwise considered incomplete.",
     )
     min_pr = fields.Float(
@@ -113,6 +113,6 @@ class AutoCurateParams(Schema):
         fields.String,
         required=False,
         cli_as_single_argument=True,
-        missing=["good", "mua"],
+        missing=["good", "mua", "inc"],
         description="Cluster labels that denote non-noise clusters.",
     )

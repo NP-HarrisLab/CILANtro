@@ -254,7 +254,6 @@ class Curator(object):
                 self.times_multi,
                 self.cluster_ids,
                 self.n_clusters,
-                self.params["sample_rate"],
             )
             srv_df = pd.DataFrame(
                 {"slid_RP_viol": slid_rp_viols}, index=self.cluster_ids
@@ -434,6 +433,11 @@ class Curator(object):
             for i in range(len(old_ids)):
                 self.times_multi[old_ids[i]] = np.array([])
 
+            # update spikes
+            self.spikes[new_id] = np.concatenate(
+                [self.spikes[old_ids[i]] for i in range(len(old_ids))]
+            )
+
             # amplitude
             meta_path = self.params["data_path"].replace(".bin", ".meta")
             meta = SGLXMeta.readMeta(Path(meta_path))
@@ -466,8 +470,8 @@ class Curator(object):
             slid_rp_viol = calc_sliding_RP_viol(self.times_multi, [new_id], 1)[0]
 
             # noise_cutoff
-            # TODO: fix me using amplitudes of spikes
-            _, nc, _ = noise_cutoff(new_amplitude)
+            sp_amplitudes = np.ptp(self.spikes[new_id])
+            _, nc, _ = noise_cutoff(sp_amplitudes)
 
             # presence_ratio
             pr = presence_ratio(self.times_multi[new_id])

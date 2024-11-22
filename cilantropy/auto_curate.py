@@ -86,32 +86,31 @@ def get_ecephys_params(npx_directory, run_dir, ks_ver, params):
     # tprime
     tprime = os.path.join(catgt_folder, f"{run_dir}_TPrime_cmd.txt")
     needs_tprime = not os.path.exists(tprime)
-    params["run_CatGT"] = params["run_CatGT"] and (needs_catgt or params["overwrite"])
-    params["runTPrime"] = params["runTPrime"] and (needs_tprime or params["overwrite"])
-    params["run_kilosort"] = params["run_kilosort"] and (
-        needs_kilosort or params["overwrite"]
-    )
-    params["run_kilosort_postprocessing"] = params["run_kilosort_postprocessing"] and (
+
+    run_catgt = params["run_CatGT"] and (needs_catgt or params["overwrite"])
+    run_tprime = params["runTPrime"] and (needs_tprime or params["overwrite"])
+    run_kilosort = params["run_kilosort"] and (needs_kilosort or params["overwrite"])
+    run_kilosort_postprocessing = params["run_kilosort_postprocessing"] and (
         needs_kilosort_postprocessing or params["overwrite"]
     )
-    params["run_noise_templates"] = params["run_noise_templates"] and (
+    run_noise_templates = params["run_noise_templates"] and (
         needs_noise_templates or params["overwrite"]
     )
-    params["run_mean_waveforms"] = params["run_mean_waveforms"] and (
+    run_mean_waveforms = params["run_mean_waveforms"] and (
         needs_mean_waveforms or params["overwrite"]
     )
-    params["run_quality_metrics"] = params["run_quality_metrics"] and (
+    run_quality_metrics = params["run_quality_metrics"] and (
         needs_quality_metrics or params["overwrite"]
     )
     if not any(
         [
-            params["run_CatGT"],
-            params["runTPrime"],
-            params["run_kilosort"],
-            params["run_kilosort_postprocessing"],
-            params["run_noise_templates"],
-            params["run_mean_waveforms"],
-            params["run_quality_metrics"],
+            run_catgt,
+            run_tprime,
+            run_kilosort,
+            run_kilosort_postprocessing,
+            run_noise_templates,
+            run_mean_waveforms,
+            run_quality_metrics,
         ]
     ):
         return
@@ -125,6 +124,13 @@ def get_ecephys_params(npx_directory, run_dir, ks_ver, params):
         "probes": ",".join(probe_ids),
     }
     info = {**info, **params}
+    info["run_CatGT"] = run_catgt
+    info["runTPrime"] = run_tprime
+    info["run_kilosort"] = run_kilosort
+    info["run_kilosort_postprocessing"] = run_kilosort_postprocessing
+    info["run_noise_templates"] = run_noise_templates
+    info["run_mean_waveforms"] = run_mean_waveforms
+    info["run_quality_metrics"] = run_quality_metrics
     return info
 
 
@@ -161,7 +167,7 @@ def run_custom_metrics(ks_folder, args):
 if __name__ == "__main__":
     # SET PARAMETERS ############################################
     params = {
-        "folder": "E:\\T09\\20241022_T09_OF_Test1",  # 21 and Hab
+        "folder": "E:\\",
         "ks_ver": "4",
         "ecephys_params": {
             "overwrite": False,
@@ -172,10 +178,9 @@ if __name__ == "__main__":
             "run_kilosort": True,
             "run_kilosort_postprocessing": True,
             "run_noise_templates": False,
-            "run_mean_waveforms": False,
+            "run_mean_waveforms": True,
             "run_quality_metrics": False,
         },
-        "run_custom_metrics": False,  # no reason since run in Curator
         "custom_metrics_params": {
             "overwrite": False,
         },  # default
@@ -195,25 +200,27 @@ if __name__ == "__main__":
 
     ############################################################
     # ecephys_spike_sorting pipeline
-    run_info = get_run_info(
-        params["folder"], params["ks_ver"], params["ecephys_params"]
-    )
-    # sort by date
-    run_info = sorted(run_info, key=lambda x: x["run_name"])
+    # run_info = get_run_info(
+    #     params["folder"], params["ks_ver"], params["ecephys_params"]
+    # )
+    # # sort by date
+    # run_info = sorted(run_info, key=lambda x: x["run_name"])
 
-    # run ecephys_spike_sorting
-    for info in tqdm(run_info, "Processing runs..."):
-        # join run_info and ecephys_params
-        sglx_pipeline.main(info)
+    # # run ecephys_spike_sorting
+    # for info in tqdm(run_info, "Processing runs..."):
+    #     f"Processing {info['run_name']}"
+    #     # join run_info and ecephys_params
+    #     sglx_pipeline.main(info)
 
     ks_folders = get_ks_folders(params["folder"], params["ks_ver"])
+    # sort by date
+    ks_folders = sorted(ks_folders)
     pbar = tqdm(ks_folders, "Processing Kilosort folders...")
     for ks_folder in pbar:
         pbar.set_description(f"Processing {ks_folder}")
 
-        if params["run_custom_metrics"]:
-            run_custom_metrics(ks_folder, params["custom_metrics_params"])
-        curator = Curator(ks_folder, **params["curator_params"])
+        if params["run_auto_curate"] or params["run_post_merge_curation"]:
+            curator = Curator(ks_folder, **params["curator_params"])
 
         if params["run_auto_curate"]:
             curator.auto_curate(params["auto_curate_params"])
