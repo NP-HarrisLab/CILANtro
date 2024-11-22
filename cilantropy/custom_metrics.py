@@ -262,7 +262,7 @@ def calc_wf_shape_metrics(
             - spat_decays: Array of spatial decay values for each waveform.
     """
     peak_chans = np.argmax(np.max(np.abs(mean_wf), axis=-1), axis=-1)
-    peak_chans[peak_chans >= 383] = 382  # TODO hacky fix
+    peak_chans[peak_chans >= channel_pos.shape[0]] = channel_pos.shape[0]-1  # TODO hacky fix
 
     num_peaks = np.zeros(mean_wf.shape[0], dtype="int8")
     num_troughs = np.zeros(mean_wf.shape[0], dtype="int8")

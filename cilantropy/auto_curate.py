@@ -136,9 +136,10 @@ def get_ecephys_params(npx_directory, run_dir, ks_ver, params):
 
 def get_ks_folders(root_dir, ks_ver):
     root_dir = os.path.abspath(root_dir)
+    catgt_folder = os.path.join(os.path.dirname(root_dir), "catgt_"+os.path.basename(root_dir))
     pattern = re.compile(r"imec\d_ks\d+")
     matching_folders = []
-    for root, dirs, _ in os.walk(root_dir):
+    for root, dirs, _ in os.walk(catgt_folder):
         if "$RECYCLE.BIN" in root:
             continue
         for dir in dirs:
@@ -172,9 +173,9 @@ if __name__ == "__main__":
         "ecephys_params": {
             "overwrite": False,
             "run_CatGT": True,
-            "process_lf": True,
+            "process_lf": False,
             "ni_present": False,
-            "runTPrime": True,
+            "runTPrime": False,
             "run_kilosort": True,
             "run_kilosort_postprocessing": True,
             "run_noise_templates": False,
@@ -185,9 +186,9 @@ if __name__ == "__main__":
             "overwrite": False,
         },  # default
         "curator_params": {},  # default
-        "run_auto_curate": True,
-        "auto_curate_params": {},  # default
-        "run_merge": True,
+        "run_auto_curate": False,
+        "auto_curate_params": {"save": True},  # default
+        "run_merge": False,
         "merge_params": {
             "overwrite": False,
             "plot_merges": False,
@@ -195,7 +196,7 @@ if __name__ == "__main__":
             "auto_accept_merges": True,
         },  # default
         "run_post_merge_curation": True,
-        "post_merge_curation_params": {},
+        "post_merge_curation_params": {"save": True},
     }
 
     ############################################################
