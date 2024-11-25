@@ -1,13 +1,16 @@
 import os
 
-from marshmallow import Schema, fields
+from marshmallow import INCLUDE, Schema, fields
 
 
 class CuratorParams(Schema):
-    # TODO get rid of RemovedInMarshmallow4Warning
     """
     Class for curation parameters
     """
+
+    class Meta:
+        unknown = INCLUDE
+
     KS_folder = fields.Str(
         required=True,
         description="Path to kilosort folder.",
@@ -58,10 +61,13 @@ class AutoCurateParams(Schema):
     Class for auto-curation parameters
     """
 
-    min_spikes = fields.Int(
+    class Meta:
+        unknown = INCLUDE
+
+    min_fr = fields.Int(
         required=False,
-        missing=100,
-        description="Minimum number of spikes in a cluster to undergo further stages.",
+        missing=0.5,
+        description="Minimum firing rate of a cluster to undergo further stages.",
     )
     min_snr = fields.Float(
         required=False,
@@ -93,10 +99,20 @@ class AutoCurateParams(Schema):
         missing=-0.1,
         description="Minimum spatial decay of a cluster waveform for it to be considered noise.",
     )
+    max_noise_cutoff = fields.Float(
+        required=False,
+        missing=5,
+        description="Maximum noise cutoff for a cluster, otherwise considered incomplete.",
+    )
+    min_pr = fields.Float(
+        required=False,
+        missing=0.9,
+        description="Minimum presence ratio of a cluster, otherwise considered incomplete.",
+    )
     good_lbls = fields.List(
         fields.String,
         required=False,
         cli_as_single_argument=True,
-        missing=["good", "mua"],
+        missing=["good", "mua", "inc"],
         description="Cluster labels that denote non-noise clusters.",
     )

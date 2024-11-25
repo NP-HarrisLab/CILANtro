@@ -1,45 +1,47 @@
-import numpy as np
-import pandas as pd
-from scipy.ndimage._filters import gaussian_filter1d
-from tqdm import tqdm
+def get_uVPerBit(meta, metaFullPath, probe_type) -> float:
+    # Returns uVPerBit conversion factor for channel 0
+    # If all channels have the same gain (usually set that way for
+    # 3A and NP1 probes; always true for NP2 probes), can use
+    # this value for all channels.
 
+    # first check if metadata includes the imChan0apGain key
+    if "uVPerBit" in meta:
+        return float(meta["uVPerBit"])
 
-def calc_amplitude_cutoff(cluster_metrics, num_bins=500, smoothing_factor=3):
-    # adapted from https://github.com/AllenInstitute/ecephys_spike_sorting/blob/archive/ecephys_spike_sorting/modules/quality_metrics/metrics.py
-    # add column for amplitude cutoff if it doesn't exist
-    if "amplitude_cutoff" not in cluster_metrics.columns:
-        cluster_metrics["amplitude_cutoff"] = pd.NA
+    if "imChan0apGain" in meta:
+        APgain = float(meta["imChan0apGain"])
+        voltage_range = float(meta["imAiRangeMax"]) - float(meta["imAiRangeMin"])
+        maxInt = float(meta["imMaxInt"])
+        uVPerBit = (1e6) * (voltage_range / APgain) / (2 * maxInt)
 
-    # calculate amplitude cutoff for each cluster if it is not already calculated
-    for cluster in tqdm(cluster_metrics.index, desc="Calculating amplitude cutoffs"):
-        if pd.isna(cluster_metrics.loc[cluster, "amplitude_cutoff"]):
-            amplitudes = cluster_metrics.loc[cluster, "amplitude"]
-            hist, bin_edges = np.histogram(amplitudes, num_bins, density=True)
-            pdf = gaussian_filter1d(hist, smoothing_factor)
-            support = bin_edges[:-1]
-            peak_idx = np.argmax(pdf)
-            G = np.argmin(np.abs(pdf[peak_idx:] - pdf[0])) + peak_idx
-            bin_size = np.mean(np.diff(support))
-            fraction_missing = np.sum(pdf[G:]) * bin_size
-            fraction_missing = np.min([fraction_missing, 0.5])
-            cluster_metrics.loc[cluster, "amplitude_cutoff"] = fraction_missing
-    return cluster_metrics
+    else:
+        imroList = meta["imroTbl"].split(sep=")")
+        # One entry for each channel plus header entry,
+        # plus a final empty entry following the last ')'
+        # channel zero is the 2nd element in the list
 
+        if probe_type == "NP21" or probe_type == "NP24":
+            # NP 2.0; APGain = 80 for all channels
+            # voltage range = 1V
+            # 14 bit ADC
+            uVPerBit = (1e6) * (1.0 / 80) / pow(2, 14)
+        elif probe_type == "NP1110":
+            # UHD2 with switches, special imro table with gain in header
+            currList = imroList[0].split(sep=",")
+            APgain = float(currList[3])
+            uVPerBit = (1e6) * (1.2 / APgain) / pow(2, 10)
+        else:
+            # 3A, 3B1, 3B2 (NP 1.0), or other NP 1.0-like probes
+            # voltage range = 1.2V
+            # 10 bit ADC
+            currList = imroList[1].split(
+                sep=" "
+            )  # 2nd element in list, skipping header
+            APgain = float(currList[3])
+            uVPerBit = (1e6) * (1.2 / APgain) / pow(2, 10)
 
-def calc_presence_ratio(cluster_metrics, num_bins=100):
-    # adapted from https://github.com/AllenInstitute/ecephys_spike_sorting/blob/archive/ecephys_spike_sorting/modules/quality_metrics/metrics.py
-    # add column for presence ratio if it doesn't exist
-    if "presence_ratio" not in cluster_metrics.columns:
-        cluster_metrics["presence_ratio"] = pd.NA
+    # save this value in meta
+    with open(metaFullPath, "ab") as f:
+        f.write(f"uVPerBit={uVPerBit}\n".encode("utf-8"))
 
-    for cluster in tqdm(cluster_metrics.index, desc="Calculating presence ratios"):
-        if pd.isna(cluster_metrics.loc[cluster, "presence_ratio"]):
-            spike_times = cluster_metrics.loc[cluster, "spike_times"]
-            min_time = np.min(spike_times)
-            max_time = np.max(spike_times)
-            hist, _ = np.histogram(
-                spike_times, np.linspace(min_time, max_time, num_bins)
-            )
-            pr = np.sum(hist > 0) / num_bins
-            cluster_metrics.loc[cluster, "presence_ratio"] = pr
-    return cluster_metrics
+    return uVPerBit
