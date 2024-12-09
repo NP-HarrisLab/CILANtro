@@ -10,60 +10,32 @@ from scipy import signal, stats
 from slay.schemas import CustomMetricsParams
 from tqdm import tqdm
 
-
 # --------------------------------------------- DATA HANDLING HELPERS -------------------------------------------------
-def extract_noise(
-    data: NDArray,
-    times: NDArray,
-    pre_samples: int,
-    post_samples: int,
-    n_chan: int,
-) -> NDArray:
+
+
+def extract_noise(data, times, pre_samples, post_samples, max_snippets=-1):
     """
-    Extracts noise snippets from the given data based on the provided spike times.
+    Extract snippets of noise from the data.
     Args:
-        data (NDArray): The input data array.
-        times (NDArray): The spike times array.
-        pre_samples (int): The number of samples to include before each spike time.
-        post_samples (int): The number of samples to include after each spike time.
-        n_chan (int): The number of channels.
+        data (NDArray): The data to extract noise from.
+        times (NDArray): The spike times.
+        post_samples (int): The number of samples after the spike time to include.
+        pre_samples (int): The number of samples before the spike time to include.
+        max_snippets (int, optional): The maximum number of snippets to extract. Defaults to 300000.
     Returns:
-        NDArray: The noise snippets array.
+        NDArray: The extracted noise snippets. Shape (max_snippets, n_channels).
     """
-    # extraction loop
-    # TODO make 2000 a parameter?
-    noise = np.zeros((n_chan, 2000 * (pre_samples + post_samples)))
-
-    ind = 0
-    for i in range(1, times.shape[0]):
-        # portions where no spikes occur
-        if (
-            (times[i] - pre_samples) - (times[i - 1] + post_samples)
-        ) > pre_samples + post_samples:
-
-            # randomly select 10 times and channels in range
-            noise_times = np.random.choice(
-                range(int(times[i - 1] + post_samples), int(times[i] - pre_samples)),
-                10,
-                replace=False,
-            )
-
-            for j in range(10):
-                start = noise_times[j] - pre_samples
-                end = noise_times[j] + post_samples
-                snip_len = pre_samples + post_samples
-                noise[:, ind * snip_len : (ind + 1) * snip_len] = data[start:end, :].T
-                noise[:, ind * snip_len : (ind + 1) * snip_len] = np.nan_to_num(
-                    noise[:, ind : ind + pre_samples + post_samples]
-                )
-                ind += 1
-
-                if ind >= 2000:
-                    return noise
-
-    if ind < 2000 - 1:
-        noise = noise[:, : (ind - 1) * (post_samples + pre_samples)]
-    return noise
+    total_samples = len(data)
+    signal_mask = np.zeros(total_samples, dtype=bool)
+    for time in times:
+        start_idx = max(0, time - pre_samples)
+        end_idx = min(total_samples, time + post_samples + 1)
+        signal_mask[start_idx:end_idx] = True
+    noise_indices = np.where(~signal_mask)[0]
+    if max_snippets != -1:
+        noise_indices = np.random.choice(noise_indices, max_snippets, replace=False)
+    noise_samples = data[noise_indices, :]
+    return noise_samples
 
 
 def custom_metrics(args: dict = None) -> None:
@@ -112,9 +84,7 @@ def custom_metrics(args: dict = None) -> None:
     )
 
     tqdm.write("Calculating background standard deviation...")
-    noise = extract_noise(
-        data, times, params["pre_samples"], params["post_samples"], n_chan
-    )
+    noise = extract_noise(data, times, params["pre_samples"], params["post_samples"])
     noise_stds = np.std(noise, axis=1)
 
     snrs = calc_SNR(mean_wf, noise_stds, good_ids)
@@ -152,7 +122,7 @@ def calc_SNR(
     """
     Calculates the signal-to-noise ratio (SNR) for each waveform.
     Parameters:
-    - mean_wf (NDArray): Array of shape (n_waveforms, n_samples, n_channels) representing the mean waveforms.
+    - mean_wf (NDArray): Array of shape (n_waveforms, n_channels, n_samples) representing the mean waveforms.
     - noise_stds (NDArray): Array of shape (n_channels,) representing the standard deviation of the noise for each channel.
     - clust_ids (NDArray): Cluster ids to calculate SNR for. Rest will be zeros.
     Returns:
@@ -161,14 +131,14 @@ def calc_SNR(
 
     tqdm.write("Calculating peak channels and amplitudes")
     # calculate peak chans, amplitudes
-    peak_chans = np.argmax(np.max(np.abs(mean_wf), axis=-1), axis=-1)
-    peak_chans[peak_chans == 384] = 383  # TODO hacky fix
-    amps = np.max(np.max(np.abs(mean_wf), axis=-1), axis=-1)
+    n_chans = mean_wf.shape[1]
+    peak_chans = np.argmax(np.ptp(mean_wf, axis=-1), axis=-1)
+    peak_chans[peak_chans >= n_chans] = n_chans - 1
+    amps = np.max(np.ptp(mean_wf, axis=-1), axis=-1)
 
     # calculate snrs
-    snrs = np.zeros(mean_wf.shape[0])
-    for i in clust_ids:
-        snrs[i] = amps[i] / noise_stds[int(peak_chans[i])]
+    peak_noise = noise_stds[peak_chans]
+    snrs = amps / (2 * peak_noise)
 
     return snrs
 
@@ -262,7 +232,9 @@ def calc_wf_shape_metrics(
             - spat_decays: Array of spatial decay values for each waveform.
     """
     peak_chans = np.argmax(np.max(np.abs(mean_wf), axis=-1), axis=-1)
-    peak_chans[peak_chans >= channel_pos.shape[0]] = channel_pos.shape[0]-1  # TODO hacky fix
+    peak_chans[peak_chans >= channel_pos.shape[0]] = (
+        channel_pos.shape[0] - 1
+    )  # TODO hacky fix
 
     num_peaks = np.zeros(mean_wf.shape[0], dtype="int8")
     num_troughs = np.zeros(mean_wf.shape[0], dtype="int8")

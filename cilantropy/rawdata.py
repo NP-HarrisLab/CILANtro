@@ -22,3 +22,7 @@ class RawData(object):
                 if "nSavedChans" in meta:
                     return int(meta.split("=")[1])
         raise ValueError("Number of channels not found in meta file")
+
+    def close(self) -> None:
+        self.data._mmap.close()
+        del self.data
