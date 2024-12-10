@@ -1,3 +1,4 @@
+import datetime
 import os
 import re
 import shutil
@@ -165,10 +166,35 @@ def run_custom_metrics(ks_folder, args):
     cilantropy.custom_metrics(args)
 
 
+def copy_folder_with_progress(src, dest):
+    """
+    Copies a folder from src to dest with a progress bar.
+    """
+    # Get the list of all files and directories
+    files_and_dirs = []
+    for root, dirs, files in os.walk(src):
+        for file in files:
+            files_and_dirs.append(os.path.join(root, file))
+        for directory in dirs:
+            files_and_dirs.append(os.path.join(root, directory))
+
+    for item in tqdm(files_and_dirs, desc="Copying files", unit=" file"):
+        # Determine destination path
+        relative_path = os.path.relpath(item, src)
+        dest_path = os.path.join(dest, relative_path)
+
+        # Copy file or create directory
+        if os.path.isfile(item):
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            shutil.copy2(item, dest_path)
+        elif os.path.isdir(item):
+            os.makedirs(dest_path, exist_ok=True)
+
+
 if __name__ == "__main__":
     # SET PARAMETERS ############################################
     params = {
-        "folder": r"D:\test2",  # "Z:\Psilocybin\Cohort_1\T09\20241031_T09_OF_Acute",
+        "folder": r"Z:\Psilocybin\Cohort_1",
         "ks_ver": "4",
         "ecephys_params": {
             "overwrite": False,
@@ -182,7 +208,7 @@ if __name__ == "__main__":
             "run_mean_waveforms": True,
             "run_quality_metrics": False,
         },
-        "curator_params": {},  # default
+        "curator_params": {"overwrite": True},  # default
         "run_auto_curate": True,
         "auto_curate_params": {},  # default
         "run_merge": True,
@@ -217,6 +243,21 @@ if __name__ == "__main__":
     for ks_folder in pbar:
         pbar.set_description(f"Processing {ks_folder}")
 
+        # # get modification time
+        # time = os.path.getmtime(ks_folder)
+        # date = datetime.datetime.fromtimestamp(time).date()
+        # if date >= datetime.date(2024, 12, 6):
+        #     continue
+
+        # move data to D: then process
+        ks_folder_orig = ks_folder
+        probe_folder = os.path.dirname(ks_folder)
+        new_probe_folder = probe_folder.replace("Z:", "D:")
+
+        if ks_folder.startswith("Z:"):
+            copy_folder_with_progress(probe_folder, new_probe_folder)
+            ks_folder = ks_folder.replace("Z:", "D:")
+
         with Curator(ks_folder, **params["curator_params"]) as curator:
             if params["run_auto_curate"]:
                 curator.auto_curate(params["auto_curate_params"])
@@ -235,3 +276,9 @@ if __name__ == "__main__":
 
             if params["run_post_merge_curation"]:
                 curator.post_merge_curation(params["post_merge_curation_params"])
+
+        # transfer over ks_folder back to Z:
+        if ks_folder != ks_folder_orig:
+            shutil.rmtree(ks_folder_orig)
+            shutil.copytree(ks_folder, ks_folder_orig)
+            shutil.rmtree(new_probe_folder)

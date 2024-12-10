@@ -1,8 +1,10 @@
 import os
 from typing import Tuple
 
+import cupy as cp
 import numpy as np
 import pandas as pd
+import psutil
 import slay
 from marshmallow import EXCLUDE
 from numpy.typing import NDArray
@@ -26,15 +28,27 @@ def extract_noise(data, times, pre_samples, post_samples, max_snippets=-1):
         NDArray: The extracted noise snippets. Shape (max_snippets, n_channels).
     """
     total_samples = len(data)
-    signal_mask = np.zeros(total_samples, dtype=bool)
+    signal_mask = cp.zeros(total_samples, dtype=bool)
     for time in times:
         start_idx = max(0, time - pre_samples)
         end_idx = min(total_samples, time + post_samples + 1)
         signal_mask[start_idx:end_idx] = True
-    noise_indices = np.where(~signal_mask)[0]
-    if max_snippets != -1:
-        noise_indices = np.random.choice(noise_indices, max_snippets, replace=False)
-    noise_samples = data[noise_indices, :]
+    noise_indices = cp.where(~signal_mask)[0]
+
+    # Get min between max_snippets and available memory
+    snippet_size_bytes = data.shape[1] * np.dtype(data.dtype).itemsize
+    available_memory = cp.cuda.runtime.memGetInfo()[0] * 0.7  # add buffer
+    max_snippets_by_memory = int(available_memory / snippet_size_bytes)
+    if max_snippets == -1:
+        max_snippets = max_snippets_by_memory
+    else:
+        max_snippets = min(max_snippets, max_snippets_by_memory)
+    if max_snippets <= 0:
+        raise MemoryError("Insufficient memory to extract any noise snippets.")
+
+    if max_snippets < len(noise_indices):
+        noise_indices = cp.random.choice(noise_indices, max_snippets, replace=False)
+    noise_samples = data[noise_indices.get(), :]
     return noise_samples
 
 
