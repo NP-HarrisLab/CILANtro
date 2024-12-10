@@ -168,26 +168,23 @@ def run_custom_metrics(ks_folder, args):
 if __name__ == "__main__":
     # SET PARAMETERS ############################################
     params = {
-        "folder": "D:\\",
+        "folder": r"D:\test2",  # "Z:\Psilocybin\Cohort_1\T09\20241031_T09_OF_Acute",
         "ks_ver": "4",
         "ecephys_params": {
             "overwrite": False,
             "run_CatGT": True,
-            "process_lf": False,
+            "process_lf": True,
             "ni_present": False,
-            "runTPrime": False,
+            "runTPrime": True,
             "run_kilosort": True,
             "run_kilosort_postprocessing": True,
             "run_noise_templates": False,
             "run_mean_waveforms": True,
             "run_quality_metrics": False,
         },
-        "custom_metrics_params": {
-            "overwrite": False,
-        },  # default
         "curator_params": {},  # default
         "run_auto_curate": True,
-        "auto_curate_params": {"save": True},  # default
+        "auto_curate_params": {},  # default
         "run_merge": True,
         "merge_params": {
             "overwrite": False,
@@ -196,22 +193,22 @@ if __name__ == "__main__":
             "auto_accept_merges": True,
         },  # default
         "run_post_merge_curation": True,
-        "post_merge_curation_params": {"save": True},
+        "post_merge_curation_params": {},
     }
 
     ############################################################
     # ecephys_spike_sorting pipeline
-    # run_info = get_run_info(
-    #     params["folder"], params["ks_ver"], params["ecephys_params"]
-    # )
-    # # sort by date
-    # run_info = sorted(run_info, key=lambda x: x["run_name"])
+    run_info = get_run_info(
+        params["folder"], params["ks_ver"], params["ecephys_params"]
+    )
+    # sort by date
+    run_info = sorted(run_info, key=lambda x: x["run_name"])
 
-    # # run ecephys_spike_sorting
-    # for info in tqdm(run_info, "Processing runs..."):
-    #     f"Processing {info['run_name']}"
-    #     # join run_info and ecephys_params
-    #     sglx_pipeline.main(info)
+    # run ecephys_spike_sorting
+    for info in tqdm(run_info, "Processing runs..."):
+        f"Processing {info['run_name']}"
+        # join run_info and ecephys_params
+        sglx_pipeline.main(info)
 
     ks_folders = get_ks_folders(params["folder"], params["ks_ver"])
     # sort by date
@@ -220,21 +217,21 @@ if __name__ == "__main__":
     for ks_folder in pbar:
         pbar.set_description(f"Processing {ks_folder}")
 
-        if params["run_auto_curate"] or params["run_post_merge_curation"]:
-            curator = Curator(ks_folder, **params["curator_params"])
+        with Curator(ks_folder, **params["curator_params"]) as curator:
+            if params["run_auto_curate"]:
+                curator.auto_curate(params["auto_curate_params"])
 
-        if params["run_auto_curate"]:
-            curator.auto_curate(params["auto_curate_params"])
+            if params["run_merge"]:
+                if params["merge_params"]["overwrite"] and os.path.exists(
+                    os.path.join(ks_folder, "automerge", "new2old.json")
+                ):
+                    shutil.rmtree(os.path.join(ks_folder, "automerge"))
+                if not os.path.exists(
+                    os.path.join(ks_folder, "automerge", "new2old.json")
+                ):
+                    slay.run.main({"KS_folder": ks_folder, **params["merge_params"]})
+                else:
+                    tqdm.write("Merges already exists")
 
-        if params["run_merge"]:
-            if params["merge_params"]["overwrite"] and os.path.exists(
-                os.path.join(ks_folder, "automerge", "new2old.json")
-            ):
-                shutil.rmtree(os.path.join(ks_folder, "automerge"))
-            if not os.path.exists(os.path.join(ks_folder, "automerge", "new2old.json")):
-                slay.run.main({"KS_folder": ks_folder, **params["merge_params"]})
-            else:
-                tqdm.write("Merges already exists")
-
-        if params["run_post_merge_curation"]:
-            curator.post_merge_curation(params["post_merge_curation_params"])
+            if params["run_post_merge_curation"]:
+                curator.post_merge_curation(params["post_merge_curation_params"])
