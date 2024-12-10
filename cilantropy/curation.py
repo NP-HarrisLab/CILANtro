@@ -117,7 +117,9 @@ class Curator(object):
 
     def _calc_metrics(self, **kwargs) -> None:
         metrics_path = os.path.join(self.ks_folder, "cilantro_metrics.tsv")
-        load_metrics = os.path.exists(metrics_path)
+        load_metrics = os.path.exists(metrics_path) and not kwargs.get(
+            "overwrite", False
+        )
 
         # if not, load metrics from individual files
         self._load_params(**kwargs)
@@ -180,8 +182,7 @@ class Curator(object):
         )
 
         # load cilantro_metrics.tsv if it exists
-        metrics_path = os.path.join(self.ks_folder, "cilantro_metrics.tsv")
-        if os.path.exists(metrics_path):
+        if load_metrics:
             self.cluster_metrics = pd.read_csv(
                 metrics_path, sep="\t", index_col="cluster_id"
             )
@@ -327,30 +328,30 @@ class Curator(object):
         # if "snr" not in metrics.columns:
         # SNR
         snr_path = os.path.join(self.ks_folder, "cluster_SNR_good.tsv")
-        if not os.path.exists(snr_path):
-            tqdm.write("Calculating background standard deviation...")
-            noise = extract_noise(
-                self.raw_data.data,
-                self.spike_times,
-                self.params["pre_samples"],
-                self.params["post_samples"],
-            )
-            noise_stds = np.std(noise, axis=0)
-            snrs = calc_SNR(self.mean_wf, noise_stds, self.cluster_ids)
-            snr_df = pd.DataFrame({"SNR_good": snrs}, index=self.cluster_ids)
-            snr_df.to_csv(
-                snr_path,
-                sep="\t",
-                index=True,
-                index_label="cluster_id",
-            )
-            tqdm.write("SNR file saved.")
-            peak_channels = self.cluster_metrics["peak"].values
-            stds = noise_stds[peak_channels]
-            self.cluster_metrics["noise_stds"] = stds
+        # if not os.path.exists(snr_path):
+        tqdm.write("Calculating background standard deviation...")
+        noise = extract_noise(
+            self.raw_data.data,
+            self.spike_times,
+            self.params["pre_samples"],
+            self.params["post_samples"],
+        )
+        noise_stds = cp.std(noise, axis=0)
+        snrs = calc_SNR(self.mean_wf, noise_stds, self.cluster_ids)
+        snr_df = pd.DataFrame({"SNR_good": snrs}, index=self.cluster_ids)
+        snr_df.to_csv(
+            snr_path,
+            sep="\t",
+            index=True,
+            index_label="cluster_id",
+        )
+        tqdm.write("SNR file saved.")
+        peak_channels = self.cluster_metrics["peak"].values
+        stds = noise_stds[peak_channels]
+        self.cluster_metrics["noise_stds"] = stds
 
-        else:
-            snr_df = pd.read_csv(snr_path, sep="\t", index_col="cluster_id")
+        # else:
+        #     snr_df = pd.read_csv(snr_path, sep="\t", index_col="cluster_id")
 
         self.cluster_metrics = pd.merge(
             self.cluster_metrics,
@@ -359,11 +360,7 @@ class Curator(object):
             right_index=True,
             how="left",
         )
-        # else:
-        #     self.cluster_metrics = self.cluster_metrics.join(
-        #         metrics["snr"].rename("SNR_good")
-        #     )
-        # save as float32
+
         self.cluster_metrics["SNR_good"] = self.cluster_metrics["SNR_good"].astype(
             "float32"
         )
