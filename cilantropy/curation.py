@@ -10,7 +10,6 @@ import slay
 from numpy.typing import NDArray
 from tqdm import tqdm
 
-import cilantropy.SGLXMetaToCoords as SGLXMeta
 from cilantropy.custom_metrics import (
     calc_presence_ratio,
     calc_sliding_RP_viol,
@@ -23,7 +22,6 @@ from cilantropy.custom_metrics import (
 )
 from cilantropy.params import AutoCurateParams, CuratorParams
 from cilantropy.rawdata import RawData
-from cilantropy.utils import get_uVPerBit
 
 
 class Curator(object):
@@ -72,11 +70,13 @@ class Curator(object):
 
     @property
     def n_clusters(self) -> int:
-        return self.cluster_metrics.index[-1] + 1
+        if self.spike_clusters is None:
+            return 0
+        return np.max(self.spike_clusters) + 1
 
     @property
     def cluster_ids(self) -> NDArray:
-        return self.cluster_metrics.index.values
+        return np.arange(self.n_clusters)
 
     @property
     def n_channels(self) -> int:
@@ -189,11 +189,11 @@ class Curator(object):
             # will update values if merges happened as needed
             self.update_merged_metrics()
         else:
-            self.create_dataframe(n_clusters)
+            self.create_dataframe(overwrite=kwargs.get("overwrite", False))
 
-    def create_dataframe(self, n_clusters) -> None:
+    def create_dataframe(self, overwrite) -> None:
         self.cluster_metrics = pd.DataFrame()
-        self.cluster_metrics["cluster_id"] = np.arange(n_clusters)
+        self.cluster_metrics["cluster_id"] = self.cluster_ids
         self.cluster_metrics.set_index("cluster_id", inplace=True)
 
         # load cluster_group.tsv
@@ -206,7 +206,7 @@ class Curator(object):
             try:
                 cl_labels.rename(columns={"KSLabel": "label"}, inplace=True)
             except KeyError:
-                cl_labels.rename(columns={"KSLabel": "group"}, inplace=True)
+                cl_labels.rename(columns={"group": "label"}, inplace=True)
 
         # merge KSLabel and group columns
         self.cluster_metrics = pd.merge(
@@ -226,7 +226,7 @@ class Curator(object):
 
         # cluster waveform shapes
         wf_path = os.path.join(self.ks_folder, "cluster_wf_shape.tsv")
-        if not os.path.exists(wf_path):
+        if overwrite or not os.path.exists(wf_path):
             tqdm.write("Calculating waveform shape metrics...")
             num_peaks, num_troughs, wf_durs, spat_decay = calc_wf_shape_metrics(
                 self.mean_wf, self.cluster_ids, self.channel_pos
@@ -255,7 +255,7 @@ class Curator(object):
 
         # refractory period violations
         cluster_rp_path = os.path.join(self.ks_folder, "cluster_RP_conf.tsv")
-        if not os.path.exists(cluster_rp_path):
+        if overwrite or not os.path.exists(cluster_rp_path):
             slid_rp_viols = calc_sliding_RP_viol(
                 self.times_multi,
                 self.cluster_ids,
@@ -283,52 +283,23 @@ class Curator(object):
             "slid_RP_viol"
         ].astype("float32")
 
-        # load J. Colonell's metrics.csv if it exists
-        metrics_path = os.path.join(self.ks_folder, "metrics.csv")
-        if os.path.exists(metrics_path):
-            metrics = pd.read_csv(metrics_path, index_col="cluster_id")
-        else:
-            metrics = pd.DataFrame()
-
-        # TODO: amplitude is not working perfectly in her code. just recalculate it
         channel_amplitudes = cp.max(self.mean_wf, 2) - cp.min(self.mean_wf, 2)
         amplitudes = cp.asnumpy(cp.max(channel_amplitudes, axis=1))
-
-        # convert to uV
-        meta_path = self.params["data_path"].replace(".bin", ".meta")
-        meta = SGLXMeta.readMeta(Path(meta_path))
-
-        if "imDatPrb_type" in meta:
-            pType = meta["imDatPrb_type"]
-            if pType == "0":
-                probe_type = "NP1"
-            else:
-                probe_type = "NP" + pType
-        else:
-            probe_type = "3A"  # 3A probe is default
-
-        amplitudes *= get_uVPerBit(meta, meta_path, probe_type)
         self.cluster_metrics["amplitude"] = amplitudes.astype("float32")
 
-        # TODO: same with peak
         peaks = channel_amplitudes.argmax(1)
         self.cluster_metrics["peak"] = peaks.astype("uint16")
 
-        if "firing_rate" not in metrics.columns:
-            self.cluster_metrics["firing_rate"] = self.cluster_metrics["n_spikes"] / (
-                len(self.raw_data.data) / self.params["sample_rate"]
-            )
-        else:
-            self.cluster_metrics = self.cluster_metrics.join(metrics["firing_rate"])
-        # save as float32
+        self.cluster_metrics["firing_rate"] = self.cluster_metrics["n_spikes"] / (
+            len(self.raw_data.data) / self.params["sample_rate"]
+        )
+
         self.cluster_metrics["firing_rate"] = self.cluster_metrics[
             "firing_rate"
         ].astype("float32")
 
-        # if "snr" not in metrics.columns:
         # SNR
         snr_path = os.path.join(self.ks_folder, "cluster_SNR_good.tsv")
-        # if not os.path.exists(snr_path):
         tqdm.write("Calculating background standard deviation...")
         noise = extract_noise(
             self.raw_data.data,
@@ -350,9 +321,6 @@ class Curator(object):
         stds = noise_stds[peak_channels]
         self.cluster_metrics["noise_stds"] = stds
 
-        # else:
-        #     snr_df = pd.read_csv(snr_path, sep="\t", index_col="cluster_id")
-
         self.cluster_metrics = pd.merge(
             self.cluster_metrics,
             snr_df,
@@ -366,19 +334,14 @@ class Curator(object):
         )
 
         # noise cutoff
-        if "nongauss_noise_cutoff" not in metrics.columns:
-            nc = calculate_noise_cutoff(
-                self.spikes,
-                self.cluster_metrics["peak"].values,
-                self.cluster_ids,
-                self.n_clusters,
-            )
-            self.cluster_metrics["noise_cutoff"] = nc
+        nc = calculate_noise_cutoff(
+            self.spikes,
+            self.cluster_metrics["peak"].values,
+            self.cluster_ids,
+            self.n_clusters,
+        )
+        self.cluster_metrics["noise_cutoff"] = nc
 
-        else:
-            self.cluster_metrics = self.cluster_metrics.join(
-                metrics["nongauss_noise_cutoff"].rename("noise_cutoff")
-            )
 
         # float32
         self.cluster_metrics["noise_cutoff"] = self.cluster_metrics[
@@ -386,18 +349,11 @@ class Curator(object):
         ].astype("float32")
 
         # presence ratio
-        if "presence_ratio" not in metrics.columns:
-            calc_presence_ratio(self.cluster_metrics, self.times_multi)
-        else:
-            self.cluster_metrics = self.cluster_metrics.join(metrics["presence_ratio"])
+        calc_presence_ratio(self.cluster_metrics, self.times_multi)
         # float32
         self.cluster_metrics["presence_ratio"] = self.cluster_metrics[
             "presence_ratio"
         ].astype("float32")
-
-        # if merged clusters after ecephys_spike_sorting, update values for new clusters
-        if not metrics.empty and metrics.index[-1] < self.cluster_metrics.index[-1]:
-            self.update_merged_metrics()
 
         tqdm.write("Calculated metrics")
 
@@ -411,7 +367,13 @@ class Curator(object):
             tqdm.write("No need to update merge metrics as no merges found.")
             return
 
-        # update mean_wf and cluster_labels
+        # update mean_wf, cluster_labels, spike_times that were updated by slay
+        self.spike_times = np.load(
+            os.path.join(self.ks_folder, "spike_times.npy")
+        ).flatten()
+        self.spike_clusters = np.load(
+            os.path.join(self.ks_folder, "spike_clusters.npy")
+        ).flatten()
         self.mean_wf = np.load(os.path.join(self.ks_folder, "mean_waveforms.npy"))
         cluster_labels = pd.read_csv(
             os.path.join(self.ks_folder, "cluster_group.tsv"),
@@ -421,56 +383,35 @@ class Curator(object):
         if "label_reason" not in cluster_labels.columns:
             cluster_labels["label_reason"] = ""
 
+        # update times_multi from merges
+        self.times_multi = slay.find_times_multi(
+            self.spike_times,
+            self.spike_clusters,
+            np.arange(self.n_clusters),
+            self.raw_data.data,
+            self.params["pre_samples"],
+            self.params["post_samples"],
+        )
+
         for new_id, old_ids in merges.items():
             if new_id in self.cluster_metrics.index:
                 continue
-            if self.spikes is None:
-                # load spikes if not already
-                _, _, self.spikes = slay.calc_mean_and_std_wf(
-                    self.params,
-                    self.n_clusters,
-                    self.cluster_ids,
-                    self.times_multi,
-                    self.raw_data.data,
-                    return_std=False,
-                    return_spikes=True,
-                )
-            old_rows = self.cluster_metrics.loc[old_ids]
-            # add spike_times to times_multi
-            # append until new_id is reached
-            while len(self.times_multi) < new_id:
-                self.times_multi.append(np.array([]))
-            self.times_multi.append(
-                np.concatenate(
-                    [self.times_multi[old_ids[i]] for i in range(len(old_ids))]
-                )
-            )
-            # make old times to empty
-            for i in range(len(old_ids)):
-                self.times_multi[old_ids[i]] = np.array([])
 
-            # update spikes
-            self.spikes[new_id] = np.concatenate(
-                [self.spikes[old_ids[i]] for i in range(len(old_ids))]
+            # Reload spikes. TODO: Could be more efficient
+            _, _, self.spikes = slay.calc_mean_and_std_wf(
+                self.params,
+                self.n_clusters,
+                self.cluster_ids,
+                self.times_multi,
+                self.raw_data.data,
+                return_std=False,
+                return_spikes=True,
             )
+            old_rows = self.cluster_metrics.loc[old_ids]
 
             # amplitude
-            meta_path = self.params["data_path"].replace(".bin", ".meta")
-            meta = SGLXMeta.readMeta(Path(meta_path))
-
-            if "imDatPrb_type" in meta:
-                pType = meta["imDatPrb_type"]
-                if pType == "0":
-                    probe_type = "NP1"
-                else:
-                    probe_type = "NP" + pType
-            else:
-                probe_type = "3A"  # 3A probe is default
-
             channel_amplitudes = (
-                np.max(self.mean_wf[new_id], 1)
-                - np.min(self.mean_wf[new_id], 1)
-                * get_uVPerBit(meta, meta_path, probe_type)
+                np.max(self.mean_wf[new_id], 1) - np.min(self.mean_wf[new_id], 1)
             ).flatten()
             new_amplitude = np.max(channel_amplitudes)
 
@@ -615,16 +556,6 @@ class Curator(object):
             index=True,
             index_label="cluster_id",
         )
-
-    def calc_spike_clusters(self) -> NDArray[np.uint32]:  # but says int32 in doc
-        # if new2old.json exists, update spike_clusters
-        if os.path.exists(os.path.join(self.ks_folder, "automerge", "new2old.json")):
-            with open(os.path.join(self.ks_folder, "automerge", "new2old.json")) as f:
-                new2old = json.load(f)
-                merges = {int(k): v for k, v in sorted(new2old.items())}
-            for new_id, old_ids in merges.items():
-                self.spike_clusters[np.isin(self.spike_clusters, old_ids)] = new_id
-        return self.spike_clusters
 
     def __enter__(self):
         return self
