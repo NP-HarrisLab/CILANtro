@@ -110,7 +110,7 @@ class Curator(object):
         params["n_chan"] = params.pop("n_channels_dat")
 
         self.params = CuratorParams().load(params)
-        if self.params.isinstance(dict):
+        if not self.params.isinstance(dict):
             self.params = self.params._asdict()["data"]
 
     def _calc_metrics(self, **kwargs) -> None:
