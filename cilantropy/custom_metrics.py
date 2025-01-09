@@ -129,10 +129,10 @@ def custom_metrics(args: dict = None) -> None:
 
 
 def calc_SNR(
-    mean_wf: NDArray[np.float_],
-    noise_stds: NDArray[np.float_],
+    mean_wf: NDArray[np.float64],
+    noise_stds: NDArray[np.float64],
     clust_ids: NDArray[np.bool_],
-) -> NDArray[np.float_]:
+) -> NDArray[np.float64]:
     """
     Calculates the signal-to-noise ratio (SNR) for each waveform.
     Parameters:
@@ -175,7 +175,7 @@ def max_cont(fr: float, rp: float, rec_dur: float, acc_cont: float) -> float:
 
 
 def calc_sliding_RP_viol(
-    times_multi: list[NDArray[np.float_]],
+    times_multi: list[NDArray[np.float64]],
     clust_ids: NDArray[np.int_],
     n_clust: int,
     bin_size: float = 0.25,
@@ -184,7 +184,7 @@ def calc_sliding_RP_viol(
     """
     Calculate the sliding refractory period violation confidence for each cluster.
     Args:
-        times_multi (list[NDArray[np.float_]]): A list of arrays containing spike times for each cluster.
+        times_multi (list[NDArray[np.float64]]): A list of arrays containing spike times for each cluster.
         clust_ids (NDArray[np.int_]): An array indicating cluster_ids to process. Should be "good" clusters.
         n_clust (int): The total number of clusters (shape of mean_wf or max_clust_id + 1).
         bin_size (float, optional): The size of each bin in milliseconds. Defaults to 0.25.
@@ -226,17 +226,19 @@ def calc_sliding_RP_viol(
 
 
 def calc_wf_shape_metrics(
-    mean_wf: NDArray[np.float_],
+    mean_wf: NDArray[np.float64],
     clust_ids: NDArray[np.int_],
-    channel_pos: NDArray[np.float_],
+    channel_pos: NDArray[np.float64],
     minThreshDetectPeaksTroughs: float = 0.2,
-) -> Tuple[NDArray[np.int_], NDArray[np.int_], NDArray[np.float_], NDArray[np.float_]]:
+) -> Tuple[
+    NDArray[np.int_], NDArray[np.int_], NDArray[np.float64], NDArray[np.float64]
+]:
     """
     Calculate waveform shape metrics.
     Args:
-        mean_wf (NDArray[np.float_]): Array of mean waveforms.
+        mean_wf (NDArray[np.float64]): Array of mean waveforms.
         clust_ids (NDArray[np.int_]): Array of cluster id's to calcualte waveform metrics for, typically "good" clusters.
-        channel_pos (NDArray[np.float_]): Array of channel positions.
+        channel_pos (NDArray[np.float64]): Array of channel positions.
         minThreshDetectPeaksTroughs (float, optional): Minimum threshold to detect peaks and troughs. Defaults to 0.2.
     Returns:
         Tuple[NDArray[int], NDArray[int], NDArray[float], NDArray[float]]: A tuple containing the following metrics:

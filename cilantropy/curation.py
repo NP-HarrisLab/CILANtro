@@ -1,7 +1,5 @@
-import atexit
 import json
 import os
-from pathlib import Path
 
 import cupy as cp
 import numpy as np
@@ -112,7 +110,7 @@ class Curator(object):
         params["n_chan"] = params.pop("n_channels_dat")
 
         self.params = CuratorParams().load(params)
-        if type(self.params) != dict:
+        if not self.params.isinstance(dict):
             self.params = self.params._asdict()["data"]
 
     def _calc_metrics(self, **kwargs) -> None:
@@ -307,7 +305,9 @@ class Curator(object):
             self.params["pre_samples"],
             self.params["post_samples"],
         )
-        noise_stds = cp.std(noise, axis=0)
+        noise_stds = cp.std(noise, axis=0) * slay.utils.get_bits_to_uV_factor(
+            self.params
+        )
         snrs = calc_SNR(self.mean_wf, noise_stds, self.cluster_ids)
         snr_df = pd.DataFrame({"SNR_good": snrs}, index=self.cluster_ids)
         snr_df.to_csv(
@@ -341,7 +341,6 @@ class Curator(object):
             self.n_clusters,
         )
         self.cluster_metrics["noise_cutoff"] = nc
-
 
         # float32
         self.cluster_metrics["noise_cutoff"] = self.cluster_metrics[
@@ -461,6 +460,9 @@ class Curator(object):
         tqdm.write("Auto-curating clusters...")
         schema = AutoCurateParams()
         params = schema.load(args)
+        # reset labels
+        self.cluster_metrics["label"] = "good"
+        self.cluster_metrics["label_reason"] = ""
 
         # mark low-spike units as noise
         low_spike_units = self.cluster_metrics[
