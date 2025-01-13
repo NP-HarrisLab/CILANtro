@@ -102,7 +102,9 @@ def custom_metrics(args: dict = None) -> None:
     noise_stds = np.std(noise, axis=1)
 
     snrs = calc_SNR(mean_wf, noise_stds, good_ids)
-    slid_rp_viols = calc_sliding_RP_viol(times_multi, good_ids, n_clust)
+    slid_rp_viols = calc_sliding_RP_viol(
+        times_multi, good_ids, n_clust, params["sample_rate"]
+    )
     num_peaks, num_troughs, wf_durs, spat_decays = calc_wf_shape_metrics(
         mean_wf, good_ids, channel_pos
     )
@@ -180,6 +182,7 @@ def calc_sliding_RP_viol(
     n_clust: int,
     bin_size: float = 0.25,
     acceptThresh: float = 0.25,
+    sample_rate: float = 30000,
 ) -> NDArray[np.float32]:
     """
     Calculate the sliding refractory period violation confidence for each cluster.
@@ -189,6 +192,7 @@ def calc_sliding_RP_viol(
         n_clust (int): The total number of clusters (shape of mean_wf or max_clust_id + 1).
         bin_size (float, optional): The size of each bin in milliseconds. Defaults to 0.25.
         acceptThresh (float, optional): The threshold for accepting refractory period violations. Defaults to 0.25.
+        sample_rate (float, optional): The sample rate of the recording in Hz. Defaults to 30000.
     Returns:
         NDArray[np.float32]: An array containing the refractory period violation confidence for each cluster.
     """
@@ -199,10 +203,10 @@ def calc_sliding_RP_viol(
     RP_conf = np.zeros(n_clust, dtype=np.float32)
 
     for i in tqdm(range(len(clust_ids)), desc="Calculating RP viol confs"):
-        times = times_multi[clust_ids[i]] / 30000
+        times = times_multi[clust_ids[i]] / sample_rate
         if times.shape[0] > 1:
             # calculate and avg halves of acg
-            acg = slay.auto_correlogram(times, 2, bin_size / 1000, 5 / 30000)
+            acg = slay.auto_correlogram(times, 2, bin_size / 1000, 5 / sample_rate)
             half_len = int(acg.shape[0] / 2)
             acg[half_len:] = (acg[half_len:] + acg[:half_len][::-1]) / 2
             acg = acg[half_len:]
