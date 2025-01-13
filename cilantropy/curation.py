@@ -110,7 +110,8 @@ class Curator(object):
         params["n_chan"] = params.pop("n_channels_dat")
 
         self.params = CuratorParams().load(params)
-        if not self.params.isinstance(dict):
+        # in case using old version of marshmallow, convert the struct to dict
+        if not isinstance(self.params, dict):
             self.params = self.params._asdict()["data"]
 
     def _calc_metrics(self, **kwargs) -> None:
