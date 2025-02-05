@@ -401,6 +401,8 @@ class Curator(object):
             self.params["pre_samples"],
             self.params["post_samples"],
         )
+        cluster_ids = np.unique(self.spike_clusters, return_counts=False)
+        cluster_ids = [i for i in cluster_ids if len(self.times_multi[i]) > 0]
         # Reload spikes. TODO: do not load for all of recording
         self.spikes = npx.extract_all_spikes(
             self.raw_data.data,
@@ -410,7 +412,6 @@ class Curator(object):
             self.params["post_samples"],
             self.params["max_spikes"],
         )
-        cluster_ids = [i for i in cluster_ids if len(self.times_multi[i]) > 0]
         for new_id, old_ids in merges.items():
             if new_id in self.cluster_metrics.index:
                 continue
