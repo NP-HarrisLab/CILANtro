@@ -2,12 +2,13 @@ import json
 import os
 
 import cupy as cp
+import npx_utils as npx
 import numpy as np
 import pandas as pd
 import slay
 from numpy.typing import NDArray
 from tqdm import tqdm
-import npx_utils as npx
+
 from cilantropy.custom_metrics import (
     calc_presence_ratio,
     calc_sliding_RP_viol,
@@ -178,8 +179,15 @@ class Curator(object):
             self.raw_data.data,
         )
 
-        # TODO
-        self.spikes = npx.extract_spikes
+        # TODO do not load in all spikes
+        self.spikes = npx.extract_all_spikes(
+            self.raw_data.data,
+            self.times_multi,
+            cluster_ids,
+            self.params["pre_samples"],
+            self.params["post_samples"],
+            self.params["max_spikes"],
+        )
 
         # load cilantro_metrics.tsv if it exists
         if load_metrics:
@@ -393,13 +401,20 @@ class Curator(object):
             self.params["pre_samples"],
             self.params["post_samples"],
         )
-
+        # Reload spikes. TODO: do not load for all of recording
+        self.spikes = npx.extract_all_spikes(
+            self.raw_data.data,
+            self.times_multi,
+            cluster_ids,
+            self.params["pre_samples"],
+            self.params["post_samples"],
+            self.params["max_spikes"],
+        )
+        cluster_ids = [i for i in cluster_ids if len(self.times_multi[i]) > 0]
         for new_id, old_ids in merges.items():
             if new_id in self.cluster_metrics.index:
                 continue
 
-            # Reload spikes. TODO: fix
-            self.spikes = npx.extract_spikes()
             old_rows = self.cluster_metrics.loc[old_ids]
 
             # amplitude
