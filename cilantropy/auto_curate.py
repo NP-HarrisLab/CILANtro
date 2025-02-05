@@ -5,6 +5,7 @@ import shutil
 
 import slay
 from ecephys_spike_sorting import sglx_pipeline
+from npx_utils import copy_folder_with_progress, get_ks_folders
 from tqdm import tqdm
 
 import cilantropy
@@ -135,21 +136,6 @@ def get_ecephys_params(npx_directory, run_dir, ks_ver, params):
     return info
 
 
-def get_ks_folders(root_dir, ks_ver):
-    root_dir = os.path.abspath(root_dir)
-    # catgt_folder = os.path.join(os.path.dirname(root_dir), "catgt_"+os.path.basename(root_dir))
-    pattern = re.compile(r"imec\d_ks\d+")
-    matching_folders = []
-    for root, dirs, _ in os.walk(root_dir):
-        if "$RECYCLE.BIN" in root:
-            continue
-        for dir in dirs:
-            if pattern.match(dir):
-                if dir.split("_")[-1] == f"ks{ks_ver}":
-                    matching_folders.append(os.path.join(root, dir))
-    return matching_folders
-
-
 def run_custom_metrics(ks_folder, args):
     paths = [
         os.path.join(ks_folder, "cluster_SNR_good.tsv"),
@@ -166,35 +152,10 @@ def run_custom_metrics(ks_folder, args):
     cilantropy.custom_metrics(args)
 
 
-def copy_folder_with_progress(src, dest):
-    """
-    Copies a folder from src to dest with a progress bar.
-    """
-    # Get the list of all files and directories
-    files_and_dirs = []
-    for root, dirs, files in os.walk(src):
-        for file in files:
-            files_and_dirs.append(os.path.join(root, file))
-        for directory in dirs:
-            files_and_dirs.append(os.path.join(root, directory))
-
-    for item in tqdm(files_and_dirs, desc="Copying files", unit=" file"):
-        # Determine destination path
-        relative_path = os.path.relpath(item, src)
-        dest_path = os.path.join(dest, relative_path)
-
-        # Copy file or create directory
-        if os.path.isfile(item):
-            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-            shutil.copy2(item, dest_path)
-        elif os.path.isdir(item):
-            os.makedirs(dest_path, exist_ok=True)
-
-
 if __name__ == "__main__":
     # SET PARAMETERS ############################################
     params = {
-        "folder": r"Z:\Psilocybin\Cohort_1",
+        "folder": r"Z:\Psilocybin",
         "ks_ver": "4",
         "ecephys_params": {
             "overwrite": False,
@@ -205,15 +166,15 @@ if __name__ == "__main__":
             "run_kilosort": True,
             "run_kilosort_postprocessing": True,
             "run_noise_templates": False,
-            "run_mean_waveforms": True,
+            "run_mean_waveforms": False,
             "run_quality_metrics": False,
         },
-        "curator_params": {"overwrite": True},  # default
+        "curator_params": {"overwrite": False},  # default
         "run_auto_curate": True,
         "auto_curate_params": {},  # default
         "run_merge": True,
         "merge_params": {
-            "overwrite": False,
+            "overwrite": True,
             "plot_merges": False,
             "max_spikes": 500,
             "auto_accept_merges": True,
@@ -221,7 +182,8 @@ if __name__ == "__main__":
         "run_post_merge_curation": True,
         "post_merge_curation_params": {},
     }
-
+    reset = False
+    processing_drive = "D:"
     ############################################################
     # ecephys_spike_sorting pipeline
     run_info = get_run_info(
@@ -243,20 +205,24 @@ if __name__ == "__main__":
     for ks_folder in pbar:
         pbar.set_description(f"Processing {ks_folder}")
 
-        # # get modification time
-        # time = os.path.getmtime(ks_folder)
-        # date = datetime.datetime.fromtimestamp(time).date()
-        # if date >= datetime.date(2024, 12, 6):
-        #     continue
-
         # move data to D: then process
         ks_folder_orig = ks_folder
+        old_drive = ks_folder.split(os.sep)[0]
         probe_folder = os.path.dirname(ks_folder)
-        new_probe_folder = probe_folder.replace("Z:", "D:")
+        new_probe_folder = probe_folder.replace(old_drive, processing_drive)
 
-        if ks_folder.startswith("Z:"):
+        # if os.path.exists(os.path.dirname(new_probe_folder)):
+        #     # skip
+        #     continue
+        if not ks_folder.startswith(processing_drive):
             copy_folder_with_progress(probe_folder, new_probe_folder)
-            ks_folder = ks_folder.replace("Z:", "D:")
+            ks_folder = ks_folder.replace(old_drive, processing_drive)
+            if reset:
+                jc_folder = f"{ks_folder}_jc"
+                if os.path.exists(jc_folder):
+                    # replace ks_folder with jc_folder
+                    shutil.rmtree(ks_folder)
+                    shutil.move(jc_folder, ks_folder)
 
         with Curator(ks_folder, **params["curator_params"]) as curator:
             if params["run_auto_curate"]:
@@ -279,6 +245,5 @@ if __name__ == "__main__":
 
         # transfer over ks_folder back to Z:
         if ks_folder != ks_folder_orig:
-            shutil.rmtree(ks_folder_orig)
-            shutil.copytree(ks_folder, ks_folder_orig)
+            shutil.copytree(ks_folder, ks_folder_orig, dirs_exist_ok=True)
             shutil.rmtree(new_probe_folder)
