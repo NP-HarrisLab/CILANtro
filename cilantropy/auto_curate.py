@@ -11,11 +11,15 @@ import cilantropy
 from cilantropy.curation import Curator
 
 
+def is_run_folder(folder):
+    pattern = re.compile(r'.*_g\d+$')
+    return pattern.match(folder)
+
+
 def get_run_info(folder, ks_ver, params):
     """currently assumes gate 0-9 index. will process separately as well - need to update"""
     root_dir = os.path.abspath(folder)
-    pattern = re.compile(r".*_g[0-9]$")
-    if pattern.match(folder):
+    if is_run_folder(folder):
         return [
             get_ecephys_params(
                 os.path.dirname(folder), os.path.basename(folder), ks_ver, params
@@ -103,18 +107,6 @@ def get_ecephys_params(npx_directory, run_dir, ks_ver, params):
     run_quality_metrics = params["run_quality_metrics"] and (
         needs_quality_metrics or params["overwrite"]
     )
-    if not any(
-        [
-            run_catgt,
-            run_tprime,
-            run_kilosort,
-            run_kilosort_postprocessing,
-            run_noise_templates,
-            run_mean_waveforms,
-            run_quality_metrics,
-        ]
-    ):
-        return
 
     run_name, gate = run_dir.split("_g")
     info = {
@@ -135,18 +127,21 @@ def get_ecephys_params(npx_directory, run_dir, ks_ver, params):
     return info
 
 
-def get_ks_folders(root_dir, ks_ver):
+def get_ks_folders(root_dir, ks_ver, catgt=True):
     root_dir = os.path.abspath(root_dir)
-    # catgt_folder = os.path.join(os.path.dirname(root_dir), "catgt_"+os.path.basename(root_dir))
     pattern = re.compile(r"imec\d_ks\d+")
+    if is_run_folder(root_dir):
+        root_dir = os.path.join(os.path.dirname(root_dir), f"catgt_{os.path.basename(root_dir)}")
     matching_folders = []
     for root, dirs, _ in os.walk(root_dir):
         if "$RECYCLE.BIN" in root:
             continue
         for dir in dirs:
             if pattern.match(dir):
-                if dir.split("_")[-1] == f"ks{ks_ver}":
-                    matching_folders.append(os.path.join(root, dir))
+                if catgt and "catgt" in root:
+                    
+                    if dir.split("_")[-1] == f"ks{ks_ver}":
+                        matching_folders.append(os.path.join(root, dir))
     return matching_folders
 
 
@@ -194,18 +189,18 @@ def copy_folder_with_progress(src, dest):
 if __name__ == "__main__":
     # SET PARAMETERS ############################################
     params = {
-        "folder": r"Z:\Psilocybin\Cohort_1",
+        "folder": r"D:\recording_data\20250204_alex_2p_STR_HPC_r4_g0",
         "ks_ver": "4",
         "ecephys_params": {
             "overwrite": False,
-            "run_CatGT": True,
-            "process_lf": True,
+            "run_CatGT": True, # leave to True if you want to run processing on sorted catgt files
+            "process_lf": False,
             "ni_present": False,
-            "runTPrime": True,
+            "runTPrime": False,
             "run_kilosort": True,
             "run_kilosort_postprocessing": True,
             "run_noise_templates": False,
-            "run_mean_waveforms": True,
+            "run_mean_waveforms": False,
             "run_quality_metrics": False,
         },
         "curator_params": {"overwrite": True},  # default
@@ -236,7 +231,7 @@ if __name__ == "__main__":
         # join run_info and ecephys_params
         sglx_pipeline.main(info)
 
-    ks_folders = get_ks_folders(params["folder"], params["ks_ver"])
+    ks_folders = get_ks_folders(params["folder"], params["ks_ver"], catgt=params["ecephys_params"]["run_CatGT"])
     # sort by date
     ks_folders = sorted(ks_folders)
     pbar = tqdm(ks_folders, "Processing Kilosort folders...")
@@ -250,13 +245,13 @@ if __name__ == "__main__":
         #     continue
 
         # move data to D: then process
-        ks_folder_orig = ks_folder
-        probe_folder = os.path.dirname(ks_folder)
-        new_probe_folder = probe_folder.replace("Z:", "D:")
+        #ks_folder_orig = ks_folder
+        #probe_folder = os.path.dirname(ks_folder)
+        #new_probe_folder = probe_folder.replace("Z:", "D:")
 
-        if ks_folder.startswith("Z:"):
-            copy_folder_with_progress(probe_folder, new_probe_folder)
-            ks_folder = ks_folder.replace("Z:", "D:")
+        #if ks_folder.startswith("Z:"):
+        #    copy_folder_with_progress(probe_folder, new_probe_folder)
+        #    ks_folder = ks_folder.replace("Z:", "D:")
 
         with Curator(ks_folder, **params["curator_params"]) as curator:
             if params["run_auto_curate"]:
@@ -278,7 +273,7 @@ if __name__ == "__main__":
                 curator.post_merge_curation(params["post_merge_curation_params"])
 
         # transfer over ks_folder back to Z:
-        if ks_folder != ks_folder_orig:
-            shutil.rmtree(ks_folder_orig)
-            shutil.copytree(ks_folder, ks_folder_orig)
-            shutil.rmtree(new_probe_folder)
+        # if ks_folder != ks_folder_orig:
+        #     shutil.rmtree(ks_folder_orig)
+        #     shutil.copytree(ks_folder, ks_folder_orig)
+        #     shutil.rmtree(new_probe_folder)
