@@ -170,14 +170,12 @@ class Curator(object):
             i for i in cluster_ids if len(self.times_multi[i]) > 0
         ]  # fix cluster ids if no spikes in bounds
 
-        self.mean_wf, _, self.spikes = slay.calc_mean_and_std_wf(
+        self.mean_wf = slay.calc_mean_wf(
             self.params,
             n_clusters,
             cluster_ids,
             self.times_multi,
             self.raw_data.data,
-            return_std=False,
-            return_spikes=not load_metrics,
         )
 
         # load cilantro_metrics.tsv if it exists
