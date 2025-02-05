@@ -5,16 +5,11 @@ import shutil
 
 import slay
 from ecephys_spike_sorting import sglx_pipeline
-from npx_utils import copy_folder_with_progress, get_ks_folders
+from npx_utils import copy_folder_with_progress, get_ks_folders, is_run_folder
 from tqdm import tqdm
 
 import cilantropy
 from cilantropy.curation import Curator
-
-
-def is_run_folder(folder):
-    pattern = re.compile(r'.*_g\d+$')
-    return pattern.match(folder)
 
 
 def get_run_info(folder, ks_ver, params):
@@ -126,7 +121,6 @@ def get_ecephys_params(npx_directory, run_dir, ks_ver, params):
     info["run_mean_waveforms"] = run_mean_waveforms
     info["run_quality_metrics"] = run_quality_metrics
     return info
-
 
 
 def run_custom_metrics(ks_folder, args):

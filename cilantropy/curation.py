@@ -7,7 +7,7 @@ import pandas as pd
 import slay
 from numpy.typing import NDArray
 from tqdm import tqdm
-
+import npx_utils as npx
 from cilantropy.custom_metrics import (
     calc_presence_ratio,
     calc_sliding_RP_viol,
@@ -177,6 +177,9 @@ class Curator(object):
             self.times_multi,
             self.raw_data.data,
         )
+
+        # TODO
+        self.spikes = npx.extract_spikes
 
         # load cilantro_metrics.tsv if it exists
         if load_metrics:
@@ -395,16 +398,8 @@ class Curator(object):
             if new_id in self.cluster_metrics.index:
                 continue
 
-            # Reload spikes. TODO: Could be more efficient
-            _, _, self.spikes = slay.calc_mean_and_std_wf(
-                self.params,
-                self.n_clusters,
-                self.cluster_ids,
-                self.times_multi,
-                self.raw_data.data,
-                return_std=False,
-                return_spikes=True,
-            )
+            # Reload spikes. TODO: fix
+            self.spikes = npx.extract_spikes()
             old_rows = self.cluster_metrics.loc[old_ids]
 
             # amplitude
