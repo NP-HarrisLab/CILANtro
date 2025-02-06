@@ -2,6 +2,7 @@ import json
 import os
 
 import cupy as cp
+import npx_utils as npx
 import numpy as np
 import pandas as pd
 import slay
@@ -176,6 +177,16 @@ class Curator(object):
             cluster_ids,
             self.times_multi,
             self.raw_data.data,
+        )
+
+        # TODO do not load in all spikes
+        self.spikes = npx.extract_all_spikes(
+            self.raw_data.data,
+            self.times_multi,
+            cluster_ids,
+            self.params["pre_samples"],
+            self.params["post_samples"],
+            self.params["max_spikes"],
         )
 
         # load cilantro_metrics.tsv if it exists
@@ -390,21 +401,21 @@ class Curator(object):
             self.params["pre_samples"],
             self.params["post_samples"],
         )
-
+        cluster_ids = np.unique(self.spike_clusters, return_counts=False)
+        cluster_ids = [i for i in cluster_ids if len(self.times_multi[i]) > 0]
+        # Reload spikes. TODO: do not load for all of recording
+        self.spikes = npx.extract_all_spikes(
+            self.raw_data.data,
+            self.times_multi,
+            cluster_ids,
+            self.params["pre_samples"],
+            self.params["post_samples"],
+            self.params["max_spikes"],
+        )
         for new_id, old_ids in merges.items():
             if new_id in self.cluster_metrics.index:
                 continue
 
-            # Reload spikes. TODO: Could be more efficient
-            _, _, self.spikes = slay.calc_mean_and_std_wf(
-                self.params,
-                self.n_clusters,
-                self.cluster_ids,
-                self.times_multi,
-                self.raw_data.data,
-                return_std=False,
-                return_spikes=True,
-            )
             old_rows = self.cluster_metrics.loc[old_ids]
 
             # amplitude
