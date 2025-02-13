@@ -5,7 +5,6 @@ import cupy as cp
 import npx_utils as npx
 import numpy as np
 import pandas as pd
-import slay
 from numpy.typing import NDArray
 from tqdm import tqdm
 
@@ -54,7 +53,6 @@ class Curator(object):
             Spike times for each cluster. Shape (n_clusters, n_spikes)
     """
 
-    # TODO fix parameters
     def __init__(self, ks_folder: str, **kwargs) -> None:
         self.ks_folder = ks_folder
         self.params: dict
@@ -108,6 +106,7 @@ class Curator(object):
             params["data_path"] = os.path.abspath(
                 os.path.join(self.ks_folder, params["data_path"])
             )
+        params["meta_path"] = params["data_path"].replace(".bin", ".meta")
         params["n_chan"] = params.pop("n_channels_dat")
 
         self.params = CuratorParams().load(params)
@@ -159,7 +158,7 @@ class Curator(object):
         cluster_ids = np.unique(self.spike_clusters, return_counts=False)
         n_clusters = np.max(cluster_ids) + 1
 
-        self.times_multi = slay.find_times_multi(
+        self.times_multi = npx.find_times_multi(
             self.spike_times,
             self.spike_clusters,
             np.arange(n_clusters),
@@ -171,7 +170,7 @@ class Curator(object):
             i for i in cluster_ids if len(self.times_multi[i]) > 0
         ]  # fix cluster ids if no spikes in bounds
 
-        self.mean_wf = slay.calc_mean_wf(
+        self.mean_wf = npx.calc_mean_wf(
             self.params,
             n_clusters,
             cluster_ids,
@@ -315,9 +314,8 @@ class Curator(object):
             self.params["pre_samples"],
             self.params["post_samples"],
         )
-        noise_stds = cp.std(noise, axis=0) * slay.utils.get_bits_to_uV_factor(
-            self.params
-        )
+        meta = npx.read_meta(self.params["meta_path"])
+        noise_stds = cp.std(noise, axis=0) * npx.get_bits_to_uV(meta)
         snrs = calc_SNR(self.mean_wf, noise_stds, self.cluster_ids)
         snr_df = pd.DataFrame({"SNR_good": snrs}, index=self.cluster_ids)
         snr_df.to_csv(
@@ -393,7 +391,7 @@ class Curator(object):
             cluster_labels["label_reason"] = ""
 
         # update times_multi from merges
-        self.times_multi = slay.find_times_multi(
+        self.times_multi = npx.find_times_multi(
             self.spike_times,
             self.spike_clusters,
             np.arange(self.n_clusters),
@@ -401,8 +399,7 @@ class Curator(object):
             self.params["pre_samples"],
             self.params["post_samples"],
         )
-        cluster_ids = np.unique(self.spike_clusters, return_counts=False)
-        cluster_ids = [i for i in cluster_ids if len(self.times_multi[i]) > 0]
+        cluster_ids = [k for k, v in self.times_multi.items() if len(v) > 0]
         # Reload spikes. TODO: do not load for all of recording
         self.spikes = npx.extract_all_spikes(
             self.raw_data.data,
@@ -465,6 +462,9 @@ class Curator(object):
             self.cluster_metrics = pd.concat(
                 [self.cluster_metrics, new_row], axis=0, ignore_index=False
             )
+            self.cluster_metrics.loc[old_ids, "label"] = f"merged"
+            self.cluster_metrics.loc[old_ids, "label_reason"] = f"merged into {new_id}"
+            self.cluster_metrics.loc[old_ids, "n_spikes"] = 0
 
     def auto_curate(self, args: dict = {}) -> None:
         tqdm.write("Auto-curating clusters...")
