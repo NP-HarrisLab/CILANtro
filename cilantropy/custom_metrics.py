@@ -2,17 +2,15 @@ import os
 from typing import Tuple
 
 import cupy as cp
+import npx_utils as npx
 import numpy as np
 import pandas as pd
-import psutil
 import slay
 from marshmallow import EXCLUDE
 from numpy.typing import NDArray
 from scipy import signal, stats
 from slay.schemas import CustomMetricsParams
 from tqdm import tqdm
-
-# --------------------------------------------- DATA HANDLING HELPERS -------------------------------------------------
 
 
 def extract_noise(data, times, pre_samples, post_samples, max_snippets=-1):
@@ -73,7 +71,7 @@ def custom_metrics(args: dict = None) -> None:
     rawData = np.memmap(data_filepath, dtype=np.int16, mode="r")
     data = np.reshape(rawData, (int(rawData.size / n_chan), n_chan))
 
-    times_multi = slay.find_times_multi(
+    times_multi = npx.find_times_multi(
         times,
         clusters,
         np.arange(clusters.max() + 1),
@@ -87,15 +85,7 @@ def custom_metrics(args: dict = None) -> None:
     cl_good = np.zeros(n_clust, dtype=bool)
     cl_good[good_ids] = True
 
-    mean_wf, _, _ = slay.calc_mean_and_std_wf(
-        params,
-        n_clust,
-        good_ids,
-        times_multi,
-        data,
-        return_std=False,
-        return_spikes=False,
-    )
+    mean_wf = npx.calc_mean_wf(params, n_clust, good_ids, times_multi, data)
 
     tqdm.write("Calculating background standard deviation...")
     noise = extract_noise(data, times, params["pre_samples"], params["post_samples"])
@@ -177,11 +167,13 @@ def max_cont(fr: float, rp: float, rec_dur: float, acc_cont: float) -> float:
 
 
 def calc_sliding_RP_viol(
-    times_multi: list[NDArray[np.float64]],
+    times_multi: dict[NDArray[np.float64]],
     clust_ids: NDArray[np.int_],
     n_clust: int,
     bin_size: float = 0.25,
     acceptThresh: float = 0.25,
+    window_size: float = 2,
+    overlap_tol: int = 5,
     sample_rate: float = 30000,
 ) -> NDArray[np.float32]:
     """
@@ -205,19 +197,21 @@ def calc_sliding_RP_viol(
     for i in tqdm(range(len(clust_ids)), desc="Calculating RP viol confs"):
         times = times_multi[clust_ids[i]] / sample_rate
         if times.shape[0] > 1:
-            # calculate and avg halves of acg
-            acg = slay.auto_correlogram(times, 2, bin_size / 1000, 5 / sample_rate)
+            # calculate and avg halves of acg to ensure symmetry
+            # keep only second half of acg, refractory period violations are compared from the center of acg
+            acg = slay.auto_correlogram(
+                times, window_size, bin_size / 1000, overlap_tol / sample_rate
+            )
             half_len = int(acg.shape[0] / 2)
-            acg[half_len:] = (acg[half_len:] + acg[:half_len][::-1]) / 2
-            acg = acg[half_len:]
+            acg = (acg[half_len:] + acg[:half_len][::-1]) / 2
 
             acg_cumsum = np.cumsum(acg)
-            sum_res = acg_cumsum[bTestIdx - 1]
+            sum_res = acg_cumsum[bTestIdx - 1]  # -1 bc 0th bin corresponds to 0-0.5 ms
 
-            # calculate max violations per refractory period size
-            num_bins_2s = acg.shape[0]
-            num_bins_1s = int(num_bins_2s / 2)
-            bin_rate = np.mean(acg[num_bins_1s:num_bins_2s])
+            # create two methods use as reference for acceptable contamination
+            num_bins_end = acg.shape[0]  # default will be 2s
+            num_bins_half = int(num_bins_end / 2)  # default will be 1s
+            bin_rate = np.mean(acg[num_bins_half:num_bins_end])
             max_conts = np.array(bTest) / bin_size * 1000 * bin_rate * acceptThresh
 
             # compute confidence of less than acceptThresh contamination at each refractory period

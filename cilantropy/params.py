@@ -21,6 +21,11 @@ class CuratorParams(Schema):
         description="Filepath to recording binary.",
         validate=lambda x: os.path.exists(x),
     )
+    meta_path = fields.Str(
+        required=True,
+        description="Filepath to meta file.",
+        validate=lambda x: os.path.exists(x),
+    )
     dtype = fields.Str(required=True, description="Data type of recording binary.")
     offset = fields.Int(required=True, description="Offset of recording binary.")
     sample_rate = fields.Float(
@@ -66,7 +71,7 @@ class AutoCurateParams(Schema):
 
     min_fr = fields.Int(
         required=False,
-        missing=0.5,
+        missing=0.2,
         description="Minimum firing rate of a cluster to undergo further stages.",
     )
     min_snr = fields.Float(

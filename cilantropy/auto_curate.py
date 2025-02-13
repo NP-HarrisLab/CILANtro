@@ -27,7 +27,7 @@ def get_run_info(folder, ks_ver, params):
         if "$RECYCLE.BIN" in root:
             continue
         for d in dirs:
-            if d.startswith("catgt"):
+            if d.startswith("catgt") or d.startswith("old"):
                 continue
             if pattern.match(d):
                 info = get_ecephys_params(root, d, ks_ver, params)
@@ -53,8 +53,7 @@ def get_ecephys_params(npx_directory, run_dir, ks_ver, params):
     needs_noise_templates = False
     needs_mean_waveforms = False
     needs_quality_metrics = False
-    for probe_folder in probe_folders:
-        probe_id = probe_folder[-1]
+    for probe_id, probe_folder in zip(probe_ids, probe_folders):
         # catGT
         tcat_ap = os.path.join(
             probe_folder,
@@ -64,9 +63,9 @@ def get_ecephys_params(npx_directory, run_dir, ks_ver, params):
             probe_folder,
             f"{run_dir}_tcat.imec{probe_id}.lf.bin",
         )
-        if params["process_lf"] and not os.path.exists(tcat_lf):
-            needs_catgt = True
-        if not os.path.exists(tcat_ap):
+        if (params["process_lf"] and not os.path.exists(tcat_lf)) or not os.path.exists(
+            tcat_ap
+        ):
             needs_catgt = True
         # kilosort
         ks_folder = os.path.join(probe_folder, f"imec{probe_id}_ks{ks_ver}")
@@ -142,12 +141,12 @@ def run_custom_metrics(ks_folder, args):
 if __name__ == "__main__":
     # SET PARAMETERS ############################################
     params = {
-        "folder": r"D:\recording_data\20250204_alex_2p_STR_HPC_r4_g0",
+        "folder": r"Z:\Psilocybin",
         "ks_ver": "4",
         "ecephys_params": {
             "overwrite": False,
-            "run_CatGT": True, # leave to True if you want to run processing on sorted catgt files
-            "process_lf": False,
+            "run_CatGT": True,  # leave to True if you want to run processing on sorted catgt files
+            "process_lf": True,
             "ni_present": False,
             "runTPrime": False,
             "run_kilosort": True,
@@ -156,7 +155,7 @@ if __name__ == "__main__":
             "run_mean_waveforms": False,
             "run_quality_metrics": False,
         },
-        "curator_params": {"overwrite": False},  # default
+        "curator_params": {"overwrite": True},  # default
         "run_auto_curate": True,
         "auto_curate_params": {},  # default
         "run_merge": True,
@@ -169,7 +168,7 @@ if __name__ == "__main__":
         "run_post_merge_curation": True,
         "post_merge_curation_params": {},
     }
-    reset = False
+    reset = True
     processing_drive = "D:"
     ############################################################
     # ecephys_spike_sorting pipeline
@@ -185,9 +184,13 @@ if __name__ == "__main__":
         # join run_info and ecephys_params
         sglx_pipeline.main(info)
 
-    ks_folders = get_ks_folders(params["folder"], params["ks_ver"], catgt=params["ecephys_params"]["run_CatGT"])
+    ks_folders = get_ks_folders(
+        params["folder"], params["ks_ver"], catgt=params["ecephys_params"]["run_CatGT"]
+    )
     # sort by date
     ks_folders = sorted(ks_folders)
+    # remove any with old in the name
+    ks_folders = [ks_folder for ks_folder in ks_folders if "old" not in ks_folder]
     pbar = tqdm(ks_folders, "Processing Kilosort folders...")
     for ks_folder in pbar:
         pbar.set_description(f"Processing {ks_folder}")
@@ -198,14 +201,17 @@ if __name__ == "__main__":
         probe_folder = os.path.dirname(ks_folder)
         new_probe_folder = probe_folder.replace(old_drive, processing_drive)
 
-        # if os.path.exists(os.path.dirname(new_probe_folder)):
-        #     # skip
+        # if modification date is within 24 hours, skip
+        # mod_date = datetime.datetime.fromtimestamp(os.path.getmtime(ks_folder))
+        # if (datetime.datetime.now() - mod_date).days < 2:
+        #     tqdm.write(f"Skipping {ks_folder}")
         #     continue
         if not ks_folder.startswith(processing_drive):
+            # if not os.path.exists(new_probe_folder):
             copy_folder_with_progress(probe_folder, new_probe_folder)
             ks_folder = ks_folder.replace(old_drive, processing_drive)
             if reset:
-                jc_folder = f"{ks_folder}_jc"
+                jc_folder = f"{ks_folder}_jc" # TODO
                 if os.path.exists(jc_folder):
                     # replace ks_folder with jc_folder
                     shutil.rmtree(ks_folder)
