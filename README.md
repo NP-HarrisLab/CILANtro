@@ -9,7 +9,8 @@
 3. If the recordings you want to sort are stored on your local hard drive (C: or D:), change `processing_drive` to the drive that the recordings are on.
 4. If you don’t want to auto-accept merge suggestions, set `auto_accept_merges` and `run_post_merge_curation` to False.
     1. Once you’ve merged the desired suggestions in Phy, you can rerun `auto_curate.py` with only `run_post_merge_curation` set to True and all other stages set to False. This will recalculate the metrics on the merged clusters and apply additional post merge filters.
-5. Run `auto_curate.py` from the command line with `python auto_curate.py`.
+5. Adjust any other parameters as desired in `main` (E.g. setting `ni_present` and `run_TPrime` to true if you have ni data, or setting `process_lf` to false if you don't want to extract LFP.)
+6. Run `auto_curate.py` from the command line with `python auto_curate.py`.
 
 # Installation Instructions
 
