@@ -66,6 +66,7 @@ pip install -e .
 4. Install the package
     
     ```bash
+    cd <ecephys_directory>
     pip install -e .
     pip install h5py
     pip install phylib
