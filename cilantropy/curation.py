@@ -10,7 +10,6 @@ from tqdm import tqdm
 
 from cilantropy.custom_metrics import (
     calc_presence_ratio,
-    calc_sliding_RP_viol,
     calc_SNR,
     calc_wf_shape_metrics,
     calculate_noise_cutoff,
@@ -263,7 +262,7 @@ class Curator(object):
         # refractory period violations
         cluster_rp_path = os.path.join(self.ks_folder, "cluster_RP_conf.tsv")
         if overwrite or not os.path.exists(cluster_rp_path):
-            slid_rp_viols = calc_sliding_RP_viol(
+            slid_rp_viols = npx.calc_sliding_RP_viol(
                 self.times_multi,
                 self.cluster_ids,
                 self.n_clusters,
@@ -430,7 +429,9 @@ class Curator(object):
             )
 
             # slid_RP_viol
-            slid_rp_viol = calc_sliding_RP_viol(self.times_multi, [new_id], 1)[0]
+            slid_rp_viol = npx.calc_sliding_RP_viol(self.times_multi, [new_id], 1)[
+                new_id
+            ]
 
             # noise_cutoff
             sp_amplitudes = np.ptp(self.spikes[new_id], 1)
@@ -462,7 +463,7 @@ class Curator(object):
             self.cluster_metrics = pd.concat(
                 [self.cluster_metrics, new_row], axis=0, ignore_index=False
             )
-            self.cluster_metrics.loc[old_ids, "label"] = f"merged"
+            self.cluster_metrics.loc[old_ids, "label"] = "merged"
             self.cluster_metrics.loc[old_ids, "label_reason"] = f"merged into {new_id}"
             self.cluster_metrics.loc[old_ids, "n_spikes"] = 0
 
