@@ -30,6 +30,7 @@ git clone https://github.com/kwikteam/npy-matlab
 ## Install packages
 
 ```bash
+conda activate pipeline
 conda install pytorch pytorch-cuda=12.4 -c pytorch -c nvidia
 conda install scipy argparse numpy pandas scikit-learn matplotlib
 pip install cupy-cuda12x marshmallow
