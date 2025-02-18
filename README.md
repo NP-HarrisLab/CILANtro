@@ -18,6 +18,7 @@
 
 ```bash
 *navigate to desired directory*
+conda create -n pipeline python=3.10
 
 git clone https://github.com/NP-HarrisLab/ecephys_spike_sorting.git
 git clone https://github.com/NP-HarrisLab/CILANtro.git
