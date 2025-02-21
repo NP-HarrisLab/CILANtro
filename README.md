@@ -4,13 +4,15 @@
 
 # Running the CILANtro pipeline
 
-1. One-time: adjust the default quality metric thresholds in [`schemas.py`](http://schemas.py) if desired. These are in the `missing` argument of each field in the `AutoCurateParams` class definition.
-2. In the main function at the bottom of `auto_curate.py` , change `“folder”` in the `params` dictionary to the desired folder. Note that CILANtro will automatically search for all SGLX recordings in the folder, so you can batch sort + curate many recordings by changing `folder` to a folder containing all the top-level SGLX recording folders
-3. If the recordings you want to sort are stored on your local hard drive (C: or D:), change `processing_drive` to the drive that the recordings are on.
-4. If you don’t want to auto-accept merge suggestions, set `auto_accept_merges` and `run_post_merge_curation` to False.
+1. One-time: adjust the default quality metric thresholds in [`schemas.py`](http://schemas.py) if desired. These are in the `missing` argument of each field in the `AutoCurateParams` class definition. Otherwise can pass in parameters as key-value pairs.
+2. In the main function at the bottom of `auto_curate.py` , change `“folder”` in the `params` dictionary to the desired folder. Note that CILANtro will automatically search for all SGLX recordings in the folder, so you can batch sort + curate many recordings by changing `folder` to a folder containing all the top-level SGLX recording folders.
+    1. You can also set the curator_params in the params dictionary here using the key-value pairs from the schemas.
+4. If the recordings you want to sort are stored on your local hard drive (C: or D:), change `processing_drive` to the drive that the recordings are on.
+5. If you don’t want to auto-accept merge suggestions, set `auto_accept_merges` and `run_post_merge_curation` to False.
     1. Once you’ve merged the desired suggestions in Phy, you can rerun `auto_curate.py` with only `run_post_merge_curation` set to True and all other stages set to False. This will recalculate the metrics on the merged clusters and apply additional post merge filters.
-5. Adjust any other parameters as desired in `main` (E.g. setting `ni_present` and `run_TPrime` to true if you have ni data, or setting `process_lf` to false if you don't want to extract LFP.)
-6. Run `auto_curate.py` from the command line with `python auto_curate.py`.
+6. Adjust any other parameters as desired in `main` (E.g. setting `ni_present` and `run_TPrime` to true if you have ni data, or setting `process_lf` to false if you don't want to extract LFP.)
+7. If you want to process the data on a different drive then it is stored (given from folder), change the processing_drive to the desired drive. Additionally, if the processing drive is different and you want to restart from a previous version (e.g. imec0_ks4_orig) set reset to True and update `jc_folder` with the desired postfix.
+9. Run `auto_curate.py` from the command line with `python auto_curate.py`.
 
 # Installation Instructions
 
@@ -52,21 +54,25 @@ pip install -e .
 
 ## Install ecephys_spike_sorting
 
-1. Install TPrime, CatGT, and CWaves,
-2. Install Kilosort 4
+1. Install NP-HarrisLab (fork)[https://github.com/NP-HarrisLab/ecephys_spike_sorting] of Jennifer Colonell's ecephys_spike_sorting pipeline
+    ```bash
+    git clone https://github.com/NP-HarrisLab/ecephys_spike_sorting
+    ``` 
+3. Install TPrime, CatGT, and CWaves,
+4. Install Kilosort 4
     
     ```bash
     pip install kilosort
     ```
     
-3. Downgrade setuptools
+5. Downgrade setuptools
     
     ```bash
     pip uninstall setuptools
     pip install setuptools==59.8.0
     ```
     
-4. Install the package
+6. Install the package
     
     ```bash
     cd <ecephys_directory>
@@ -75,8 +81,8 @@ pip install -e .
     pip install phylib
     ```
     
-5. In `ecephys_spike_sorting/scripts/create_input_json_params.json`, change the directories to point to your local installations (kilosort25 is optional if you only want to run kilosort4
-6. (OPTIONAL) If you want to run kilosort2.5 
+7. In `ecephys_spike_sorting/scripts/create_input_json_params.json`, change the directories to point to your local installations (kilosort25 is optional if you only want to run kilosort4
+8. (OPTIONAL) If you want to run kilosort2.5 
     1. Install kilosort2.5 from using the instructions [here](https://github.com/MouseLand/Kilosort/tree/kilosort25) 
     2. Install the MATLAB engine for python
         
