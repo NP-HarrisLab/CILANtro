@@ -93,6 +93,5 @@ pip install -e .
 
 ```bash
 cd <slay_directory>
-conda env update -n pipeline -f environment.yml
 pip install -e .
 ```
