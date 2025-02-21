@@ -54,25 +54,22 @@ pip install -e .
 
 ## Install ecephys_spike_sorting
 
-1. Install NP-HarrisLab (fork)[https://github.com/NP-HarrisLab/ecephys_spike_sorting] of Jennifer Colonell's ecephys_spike_sorting pipeline
-    ```bash
-    git clone https://github.com/NP-HarrisLab/ecephys_spike_sorting
-    ``` 
-3. Install TPrime, CatGT, and CWaves,
-4. Install Kilosort 4
+1. Install NP-HarrisLab [fork](https://github.com/NP-HarrisLab/ecephys_spike_sorting) of Jennifer Colonell's ecephys_spike_sorting pipeline as indicated above
+2. Install TPrime, CatGT, and CWaves,
+3. Install Kilosort 4
     
     ```bash
     pip install kilosort
     ```
     
-5. Downgrade setuptools
+4. Downgrade setuptools
     
     ```bash
     pip uninstall setuptools
     pip install setuptools==59.8.0
     ```
     
-6. Install the package
+5. Install the package
     
     ```bash
     cd <ecephys_directory>
@@ -81,8 +78,8 @@ pip install -e .
     pip install phylib
     ```
     
-7. In `ecephys_spike_sorting/scripts/create_input_json_params.json`, change the directories to point to your local installations (kilosort25 is optional if you only want to run kilosort4
-8. (OPTIONAL) If you want to run kilosort2.5 
+6. In `ecephys_spike_sorting/scripts/create_input_json_params.json`, change the directories to point to your local installations (kilosort25 is optional if you only want to run kilosort4
+7. (OPTIONAL) If you want to run kilosort2.5 
     1. Install kilosort2.5 from using the instructions [here](https://github.com/MouseLand/Kilosort/tree/kilosort25) 
     2. Install the MATLAB engine for python
         
