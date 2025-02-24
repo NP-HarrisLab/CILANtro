@@ -32,7 +32,7 @@ git clone https://github.com/kwikteam/npy-matlab
 ```bash
 conda activate pipeline
 conda install pytorch pytorch-cuda=12.4 -c pytorch -c nvidia
-conda install scipy argparse numpy pandas scikit-learn matplotlib
+conda install scipy numpy pandas scikit-learn matplotlib
 pip install cupy-cuda12x marshmallow
 ```
 
@@ -52,7 +52,7 @@ pip install -e .
 
 ## Install ecephys_spike_sorting
 
-1. Install TPrime, CatGT, and CWaves,
+1. Download and extract TPrime, CatGT, and CWaves from the [SpikeGLX website](https://billkarsh.github.io/SpikeGLX/#catgt)
 2. Install Kilosort 4
     
     ```bash
