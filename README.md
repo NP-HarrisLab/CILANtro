@@ -8,7 +8,7 @@
 2. In the main function at the bottom of `auto_curate.py` , change `“folder”` in the `params` dictionary to the desired folder. Note that CILANtro will automatically search for all SGLX recordings in the folder, so you can batch sort + curate many recordings by changing `folder` to a folder containing all the top-level SGLX recording folders
 3. If the recordings you want to sort are stored on your local hard drive (C: or D:), change `processing_drive` to the drive that the recordings are on.
 4. If you don’t want to auto-accept merge suggestions, set `auto_accept_merges` and `run_post_merge_curation` to False.
-    1. Once you’ve merged the desired suggestions in Phy, you can rerun `auto_curate.py` with only `run_post_merge_curation` set to True and all other stages set to False. This will recalculate the metrics on the merged clusters and apply additional post merge filters.
+    1. Once you’ve merged the desired suggestions in Phy, you can rerun `auto_curate.py` with only `run_post_merge_curation` set to True and all other stages (including `overwrite`) set to False. This will recalculate the metrics on the merged clusters and apply additional post merge filters.
 5. Adjust any other parameters as desired in `main` (E.g. setting `ni_present` and `run_TPrime` to true if you have ni data, or setting `process_lf` to false if you don't want to extract LFP.)
 6. Run `auto_curate.py` from the command line with `python auto_curate.py`.
 
@@ -75,7 +75,7 @@ pip install -e .
     pip install phylib
     ```
     
-5. In `ecephys_spike_sorting/scripts/create_input_json_params.json`, change the directories to point to your local installations (kilosort25 is optional if you only want to run kilosort4
+5. In `ecephys_spike_sorting/scripts/create_input_json_params.json`, change the directories to point to your local installations (if you only want to run kilosort4, you still must set the KS2.5 path to a folder THAT EXISTS)
 6. (OPTIONAL) If you want to run kilosort2.5 
     1. Install kilosort2.5 from using the instructions [here](https://github.com/MouseLand/Kilosort/tree/kilosort25) 
     2. Install the MATLAB engine for python
