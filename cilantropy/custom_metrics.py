@@ -8,7 +8,7 @@ import pandas as pd
 import slay
 from marshmallow import EXCLUDE
 from numpy.typing import NDArray
-from scipy import signal, stats
+from scipy import signal
 from slay.schemas import CustomMetricsParams
 from tqdm import tqdm
 
@@ -92,7 +92,7 @@ def custom_metrics(args: dict = None) -> None:
     noise_stds = np.std(noise, axis=1)
 
     snrs = calc_SNR(mean_wf, noise_stds, good_ids)
-    slid_rp_viols = calc_sliding_RP_viol(
+    slid_rp_viols = npx.calc_sliding_RP_viol(
         times_multi, good_ids, n_clust, params["sample_rate"]
     )
     num_peaks, num_troughs, wf_durs, spat_decays = calc_wf_shape_metrics(
@@ -147,80 +147,6 @@ def calc_SNR(
     snrs = amps / (2 * peak_noise)
 
     return snrs
-
-
-def max_cont(fr: float, rp: float, rec_dur: float, acc_cont: float) -> float:
-    """
-    Calculates the maximum number of continuous events expected based on the given parameters.
-    Args:
-        fr (float): The firing rate of the events.
-        rp (float): The refractory period between events.
-        rec_dur (float): The recording duration.
-        acc_cont (float): The acceptable level of continuity.
-    Returns:
-        cnt_exp (float): The maximum number of continuous events expected.
-    """
-    time_for_viol = rp * fr * rec_dur * 2
-    cnt_exp = acc_cont * time_for_viol
-
-    return cnt_exp
-
-
-def calc_sliding_RP_viol(
-    times_multi: dict[NDArray[np.float64]],
-    clust_ids: NDArray[np.int_],
-    n_clust: int,
-    bin_size: float = 0.25,
-    acceptThresh: float = 0.25,
-    window_size: float = 2,
-    overlap_tol: int = 5,
-    sample_rate: float = 30000,
-) -> NDArray[np.float32]:
-    """
-    Calculate the sliding refractory period violation confidence for each cluster.
-    Args:
-        times_multi (list[NDArray[np.float64]]): A list of arrays containing spike times for each cluster.
-        clust_ids (NDArray[np.int_]): An array indicating cluster_ids to process. Should be "good" clusters.
-        n_clust (int): The total number of clusters (shape of mean_wf or max_clust_id + 1).
-        bin_size (float, optional): The size of each bin in milliseconds. Defaults to 0.25.
-        acceptThresh (float, optional): The threshold for accepting refractory period violations. Defaults to 0.25.
-        sample_rate (float, optional): The sample rate of the recording in Hz. Defaults to 30000.
-    Returns:
-        NDArray[np.float32]: An array containing the refractory period violation confidence for each cluster.
-    """
-    b = np.arange(0, 10.25, bin_size) / 1000
-    bTestIdx = np.array([1, 2, 4, 6, 8, 12, 16, 20, 24, 28, 32, 36, 40], dtype="int8")
-    bTest = [b[i] for i in bTestIdx]  # -1 bc 0th bin corresponds to 0-0.5 ms
-
-    RP_conf = np.zeros(n_clust, dtype=np.float32)
-
-    for i in tqdm(range(len(clust_ids)), desc="Calculating RP viol confs"):
-        times = times_multi[clust_ids[i]] / sample_rate
-        if times.shape[0] > 1:
-            # calculate and avg halves of acg to ensure symmetry
-            # keep only second half of acg, refractory period violations are compared from the center of acg
-            acg = slay.auto_correlogram(
-                times, window_size, bin_size / 1000, overlap_tol / sample_rate
-            )
-            half_len = int(acg.shape[0] / 2)
-            acg = (acg[half_len:] + acg[:half_len][::-1]) / 2
-
-            acg_cumsum = np.cumsum(acg)
-            sum_res = acg_cumsum[bTestIdx - 1]  # -1 bc 0th bin corresponds to 0-0.5 ms
-
-            # create two methods use as reference for acceptable contamination
-            num_bins_end = acg.shape[0]  # default will be 2s
-            num_bins_half = int(num_bins_end / 2)  # default will be 1s
-            bin_rate = np.mean(acg[num_bins_half:num_bins_end])
-            max_conts = np.array(bTest) / bin_size * 1000 * bin_rate * acceptThresh
-
-            # compute confidence of less than acceptThresh contamination at each refractory period
-            confs = []
-            for j, cnt in enumerate(sum_res):
-                confs.append(1 - stats.poisson.cdf(cnt, max_conts[j]))
-            RP_conf[i] = 1 - max(confs)
-
-    return RP_conf
 
 
 def calc_wf_shape_metrics(

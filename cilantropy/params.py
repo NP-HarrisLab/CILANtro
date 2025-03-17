@@ -71,7 +71,7 @@ class AutoCurateParams(Schema):
 
     min_fr = fields.Int(
         required=False,
-        missing=0.2,
+        missing=0.1,
         description="Minimum firing rate of a cluster to undergo further stages.",
     )
     min_snr = fields.Float(
