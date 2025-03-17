@@ -29,7 +29,7 @@ class Curator(object):
         cluster_metrics: pd.DataFrame
             Cluster metrics.
         spike_clusters: NDArray
-            cluster_id for each spike. Shape (n_spikes,)
+            cluster_id for each spike. Shape (num_spikes,)
         n_clusters: int
             Number of clusters.
         cluster_ids: NDArray
@@ -39,7 +39,7 @@ class Curator(object):
         raw_data: RawData
             RawData object.
         spike_times: NDArray
-            Spike times. Shape (n_spikes,)
+            Spike times. Shape (num_spikes,)
         params: CuratorParams
             Parameters for curation.
         cluster_metrics: pd.DataFrame
@@ -49,7 +49,7 @@ class Curator(object):
         channel_pos: NDArray
             Channel positions. Shape (n_channels, 2)
         times_multi: NDArray
-            Spike times for each cluster. Shape (n_clusters, n_spikes)
+            Spike times for each cluster. Shape (n_clusters, num_spikes)
     """
 
     def __init__(self, ks_folder: str, **kwargs) -> None:
@@ -88,7 +88,7 @@ class Curator(object):
 
     @property
     def counts(self) -> NDArray:
-        return self.cluster_metrics["n_spikes"].values
+        return self.cluster_metrics["num_spikes"].values
 
     def _load_params(self, **kwargs) -> None:
         params = kwargs
@@ -222,11 +222,11 @@ class Curator(object):
             left_index=True,
             right_index=True,
         )
-        self.cluster_metrics["n_spikes"] = [
+        self.cluster_metrics["num_spikes"] = [
             len(self.times_multi[i]) for i in self.cluster_ids
         ]
         # save as uint32
-        self.cluster_metrics["n_spikes"] = self.cluster_metrics["n_spikes"].astype(
+        self.cluster_metrics["num_spikes"] = self.cluster_metrics["num_spikes"].astype(
             "uint32"
         )
 
@@ -296,7 +296,7 @@ class Curator(object):
         peaks = channel_amplitudes.argmax(1)
         self.cluster_metrics["peak"] = peaks.astype("uint16")
 
-        self.cluster_metrics["firing_rate"] = self.cluster_metrics["n_spikes"] / (
+        self.cluster_metrics["firing_rate"] = self.cluster_metrics["num_spikes"] / (
             len(self.raw_data.data) / self.params["sample_rate"]
         )
 
@@ -424,14 +424,12 @@ class Curator(object):
             peak = np.argmax(channel_amplitudes, axis=0)
 
             # SNR_good
-            snr = np.sum(old_rows["SNR_good"] * old_rows["n_spikes"]) / np.sum(
-                old_rows["n_spikes"]
+            snr = np.sum(old_rows["SNR_good"] * old_rows["num_spikes"]) / np.sum(
+                old_rows["num_spikes"]
             )
 
             # slid_RP_viol
-            slid_rp_viol = npx.calc_sliding_RP_viol(self.times_multi, [new_id], 1)[
-                new_id
-            ]
+            slid_rp_viol = npx.calc_sliding_RP_viol(self.times_multi, [new_id])[new_id]
 
             # noise_cutoff
             sp_amplitudes = np.ptp(self.spikes[new_id], 1)
@@ -441,7 +439,7 @@ class Curator(object):
             pr = presence_ratio(self.times_multi[new_id])
 
             # firing rate
-            fr = np.sum(old_rows["n_spikes"]) / (
+            fr = np.sum(old_rows["num_spikes"]) / (
                 len(self.raw_data.data) / self.params["sample_rate"]
             )
 
@@ -449,7 +447,7 @@ class Curator(object):
                 {
                     "label": cluster_labels.loc[new_id, "label"],
                     "label_reason": cluster_labels.loc[new_id, "label_reason"],
-                    "n_spikes": old_rows["n_spikes"].sum(),
+                    "num_spikes": old_rows["num_spikes"].sum(),
                     "firing_rate": fr,
                     "SNR_good": snr,
                     "slid_RP_viol": slid_rp_viol,
@@ -465,7 +463,7 @@ class Curator(object):
             )
             self.cluster_metrics.loc[old_ids, "label"] = "merged"
             self.cluster_metrics.loc[old_ids, "label_reason"] = f"merged into {new_id}"
-            self.cluster_metrics.loc[old_ids, "n_spikes"] = 0
+            self.cluster_metrics.loc[old_ids, "num_spikes"] = 0
 
     def auto_curate(self, args: dict = {}) -> None:
         tqdm.write("Auto-curating clusters...")
