@@ -265,7 +265,6 @@ class Curator(object):
             slid_rp_viols = npx.calc_sliding_RP_viol(
                 self.times_multi,
                 self.cluster_ids,
-                self.n_clusters,
             )
             srv_df = pd.DataFrame(
                 {"slid_RP_viol": slid_rp_viols}, index=self.cluster_ids

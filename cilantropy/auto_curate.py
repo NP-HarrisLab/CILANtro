@@ -141,7 +141,7 @@ def run_custom_metrics(ks_folder, args):
 if __name__ == "__main__":
     # SET PARAMETERS ############################################
     params = {
-        "folder": r"Z:\Psilocybin",
+        "folder": r"D:\recording_data\YZ_010925_day24_p1_s2_p2_sh2_g0",
         "ks_ver": "4",
         "ecephys_params": {
             "overwrite": False,
