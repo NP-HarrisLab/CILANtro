@@ -78,7 +78,7 @@ def get_ecephys_params(npx_directory, run_dir, ks_ver, params):
         # mean waveforms
         needs_mean_waveforms = not os.path.exists(
             os.path.join(ks_folder, "mean_waveforms.npy")
-        )  # TODO
+        )
         # quality metrics
         needs_quality_metrics = not os.path.exists(
             os.path.join(ks_folder, "metrics.csv")
@@ -229,7 +229,6 @@ if __name__ == "__main__":
         if info["run_CatGT"] or not os.path.exists(catgt_folder):
             copy_folder_with_progress(catgt_folder_proc, catgt_folder, overwrite=True)
 
-        # save output as ks folder _jc
         for probe_folder in catgt_probe_folders:
             probe_id = int(probe_folder.split("imec")[-1])
             ks_folder_orig = os.path.join(
