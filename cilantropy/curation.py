@@ -177,6 +177,16 @@ class Curator(object):
             self.raw_data.data,
         )
 
+        # calculate mean waveform for tracking
+        npx.calc_mean_wf_split(
+            self.params,
+            n_clusters,
+            cluster_ids,
+            self.times_multi,
+            self.raw_data.data,
+            n_splits=2,
+        )
+
         # TODO do not load in all spikes
         self.spikes = npx.extract_all_spikes(
             self.raw_data.data,
