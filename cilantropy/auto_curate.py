@@ -27,7 +27,12 @@ def get_run_info(folder, ks_ver, params):
         if "$RECYCLE.BIN" in root:
             continue
         for d in dirs:
-            if d.startswith("catgt") or d.startswith("old") or "SvyPrb" in d:
+            if (
+                d.startswith("catgt")
+                or d.startswith("old")
+                or "SvyPrb" in d
+                or d.startswith("supercat")
+            ):
                 continue
             if pattern.match(d):
                 info = get_ecephys_params(root, d, ks_ver, params)
@@ -141,21 +146,21 @@ def run_custom_metrics(ks_folder, args):
 if __name__ == "__main__":
     # SET PARAMETERS ############################################
     params = {
-        "folder": r"Z:\Psilocybin\Cohort_2\T12\20250415_T12_baseline",
+        "folder": r"d:\Psilocybin\Cohort_2\T13\20250417_T13_acute\20250417_T13_acute_drug_g0",
         "ks_ver": "4",
         "ecephys_params": {
-            "overwrite": True,
+            "overwrite": False,
             "run_CatGT": True,  # leave to True if you want to run processing on sorted catgt files
             "process_lf": True,
             "ni_present": False,
             # "ni_extract_string": "-xa=0,0,0,1,1,0 -xa=0,0,1,1,1,10 -xa=0,0,2,1,1,500 -xa=0,0,3,1,1,500",
             "runTPrime": False,
-            "run_kilosort": True,
-            "run_kilosort_postprocessing": True,
+            "run_kilosort": False,
+            "run_kilosort_postprocessing": False,
             "run_noise_templates": False,
             "run_mean_waveforms": False,
             "run_quality_metrics": False,
-            "maxsecs": 15 * 60,  # 15 minutes
+            "maxsecs": 60 * 60,  # 15 minutes
         },
         "curator_params": {"overwrite": False},  # default
         "run_auto_curate": False,
@@ -169,6 +174,7 @@ if __name__ == "__main__":
         },  # default
         "run_post_merge_curation": False,
         "post_merge_curation_params": {},
+        "delete": False,
     }
     processing_drive = "D:"
     orig_drive = params["folder"].split(os.sep)[0]
@@ -183,7 +189,21 @@ if __name__ == "__main__":
     # run ecephys_spike_sorting
     for info in tqdm(run_info, "Processing runs..."):
         f"Processing {info['run_name']}"
-
+        # processes = [
+        #     info["run_CatGT"],
+        #     info["run_kilosort"],
+        #     info["runTPrime"],
+        #     info["run_kilosort_postprocessing"],
+        #     info["run_noise_templates"],
+        #     info["run_mean_waveforms"],
+        #     info["run_quality_metrics"],
+        #     params["run_auto_curate"],
+        #     params["run_merge"],
+        #     params["run_post_merge_curation"],
+        # ]
+        # if not any(processes):
+        #     tqdm.write(f"Nothing to process for {info['run_name']}")
+        #     continue
         # copy over to D: and process
         probe_folders = [
             os.path.join(
@@ -236,45 +256,46 @@ if __name__ == "__main__":
             )
             ks_folder_proc = ks_folder_orig.replace(orig_drive, processing_drive)
 
-            if (
-                params["ecephys_params"]["run_kilosort"]
-                and params["ecephys_params"]["run_kilosort_postprocessing"]
-            ):
+            if info["run_kilosort"] and info["run_kilosort_postprocessing"]:
                 copy_folder_with_progress(
                     ks_folder_proc, f"{ks_folder_proc}_jc", overwrite=True
                 )
                 copy_folder_with_progress(
                     ks_folder_proc + "_jc", ks_folder_orig + "_jc", overwrite=True
                 )
-            elif not os.path.exists(ks_folder_proc + "_orig"):
+            elif info["run_kilosort"] and not os.path.exists(ks_folder_proc + "_orig"):
                 copy_folder_with_progress(ks_folder_proc, ks_folder_proc + "_orig")
                 copy_folder_with_progress(ks_folder_proc, ks_folder_orig + "_orig")
 
-            with Curator(ks_folder_proc, **params["curator_params"]) as curator:
-                if params["run_auto_curate"]:
-                    curator.auto_curate(params["auto_curate_params"])
-                if params["run_merge"]:
-                    if params["merge_params"]["overwrite"] and os.path.exists(
-                        os.path.join(ks_folder_proc, "automerge", "new2old.json")
-                    ):
-                        shutil.rmtree(os.path.join(ks_folder_proc, "automerge"))
-                    if not os.path.exists(
-                        os.path.join(ks_folder_proc, "automerge", "new2old.json")
-                    ):
-                        slay.run.main(
-                            {"KS_folder": ks_folder_proc, **params["merge_params"]}
-                        )
-                    else:
-                        tqdm.write("Merges already exists")
+            # with Curator(ks_folder_proc, **params["curator_params"]) as curator:
+            #     if params["run_auto_curate"]:
+            #         curator.auto_curate(params["auto_curate_params"])
+            #     if params["run_merge"]:
+            #         if params["merge_params"]["overwrite"] and os.path.exists(
+            #             os.path.join(ks_folder_proc, "automerge", "new2old.json")
+            #         ):
+            #             shutil.rmtree(os.path.join(ks_folder_proc, "automerge"))
+            #         if not os.path.exists(
+            #             os.path.join(ks_folder_proc, "automerge", "new2old.json")
+            #         ):
+            #             slay.run.main(
+            #                 {"KS_folder": ks_folder_proc, **params["merge_params"]}
+            #             )
+            #         else:
+            #             tqdm.write("Merges already exists")
 
-                if params["run_post_merge_curation"]:
-                    curator.post_merge_curation(params["post_merge_curation_params"])
+            #     if params["run_post_merge_curation"]:
+            #         curator.post_merge_curation(params["post_merge_curation_params"])
 
-            if orig_drive != processing_drive:
-                print("Copying ks folder")
-                copy_folder_with_progress(
-                    ks_folder_proc, ks_folder_orig, overwrite=True
-                )
+            # if orig_drive != processing_drive:
+            #     print("Copying ks folder")
+            #     copy_folder_with_progress(
+            #         ks_folder_proc, ks_folder_orig, overwrite=True
+            #     )
 
-        if orig_drive != processing_drive:
-            shutil.rmtree(catgt_folder_proc)
+        # if params["delete"] and (orig_drive != processing_drive):
+        #     shutil.rmtree(catgt_folder_proc)
+        #     reg_folder_proc = os.path.join(
+        #         info["npx_directory"], f"{info['run_name']}_g{info['gate_index']}"
+        #     )
+        #     shutil.rmtree(reg_folder_proc)

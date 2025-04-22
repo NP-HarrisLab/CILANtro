@@ -203,6 +203,7 @@ class Curator(object):
                 metrics_path, sep="\t", index_col="cluster_id"
             )
             # will update values if merges happened as needed
+            # TODO: dont update every time
             self.update_merged_metrics()
         else:
             self.create_dataframe(overwrite=kwargs.get("overwrite", False))
