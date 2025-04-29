@@ -45,7 +45,7 @@ if __name__ == "__main__":
     # SET PARAMETERS ############################################
     # folder should be one above supercat _g0 folders
     params = {
-        "folder": r"D:\Psilocybin\Cohort_2\T13\20250417_T13_acute",
+        "folder": r"D:\Psilocybin\Cohort_2\T15\20250417_T15_acute",
         "overwrite": False,
         "processing_drive": "D:",
         "delete": False,  # delete from processing drive

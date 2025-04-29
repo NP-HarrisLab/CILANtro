@@ -187,16 +187,6 @@ class Curator(object):
             n_splits=2,
         )
 
-        # TODO do not load in all spikes
-        self.spikes = npx.extract_all_spikes(
-            self.raw_data.data,
-            self.times_multi,
-            cluster_ids,
-            self.params["pre_samples"],
-            self.params["post_samples"],
-            self.params["max_spikes"],
-        )
-
         # load cilantro_metrics.tsv if it exists
         if load_metrics:
             self.cluster_metrics = pd.read_csv(
@@ -206,6 +196,15 @@ class Curator(object):
             # TODO: dont update every time
             self.update_merged_metrics()
         else:
+            # TODO do not load in all spikes
+            self.spikes = npx.extract_all_spikes(
+                self.raw_data.data,
+                self.times_multi,
+                cluster_ids,
+                self.params["pre_samples"],
+                self.params["post_samples"],
+                self.params["max_spikes"],
+            )
             self.create_dataframe(overwrite=kwargs.get("overwrite", False))
 
     def create_dataframe(self, overwrite) -> None:
