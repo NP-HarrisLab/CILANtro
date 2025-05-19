@@ -177,14 +177,14 @@ class Curator(object):
             self.raw_data.data,
         )
 
-        # TODO do not load in all spikes
-        self.spikes = npx.extract_all_spikes(
-            self.raw_data.data,
-            self.times_multi,
+        # calculate mean waveform for tracking
+        npx.calc_mean_wf_split(
+            self.params,
+            n_clusters,
             cluster_ids,
-            self.params["pre_samples"],
-            self.params["post_samples"],
-            self.params["max_spikes"],
+            self.times_multi,
+            self.raw_data.data,
+            n_splits=2,
         )
 
         # load cilantro_metrics.tsv if it exists
@@ -193,8 +193,18 @@ class Curator(object):
                 metrics_path, sep="\t", index_col="cluster_id"
             )
             # will update values if merges happened as needed
+            # TODO: dont update every time
             self.update_merged_metrics()
         else:
+            # TODO do not load in all spikes
+            self.spikes = npx.extract_all_spikes(
+                self.raw_data.data,
+                self.times_multi,
+                cluster_ids,
+                self.params["pre_samples"],
+                self.params["post_samples"],
+                self.params["max_spikes"],
+            )
             self.create_dataframe(overwrite=kwargs.get("overwrite", False))
 
     def create_dataframe(self, overwrite) -> None:
