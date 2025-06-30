@@ -8,9 +8,6 @@ class CuratorParams(Schema):
     Class for curation parameters
     """
 
-    class Meta:
-        unknown = INCLUDE
-
     KS_folder = fields.Str(
         required=True,
         description="Path to kilosort folder.",
@@ -66,53 +63,47 @@ class AutoCurateParams(Schema):
     Class for auto-curation parameters
     """
 
-    class Meta:
-        unknown = INCLUDE
-
-    min_fr = fields.Int(
+    min_fr = fields.Float(
         required=False,
         missing=0.1,
+        allow_none=True,
         description="Minimum firing rate of a cluster to undergo further stages.",
     )
     min_snr = fields.Float(
         required=False,
         missing=3.0,
+        allow_none=True,
         description="Minimum SNR for a cluster to undergo further stages.",
     )
     max_rp_viol = fields.Float(
         required=False,
         missing=0.1,
+        allow_none=True,
         description="Maximum refractory period violations for a cluster to undergo further stages.",
     )
     max_peaks = fields.Int(
         required=False,
         missing=1,
+        allow_none=True,
         description="Maximum number of peaks in a cluster waveform for it to be considered noise.",
     )
     max_troughs = fields.Int(
         required=False,
         missing=1,
+        allow_none=True,
         description="Maximum number of troughs in a cluster waveform for it to be considered noise.",
     )
     max_wf_dur = fields.Float(
         required=False,
         missing=0.9,
+        allow_none=True,
         description="Maximum duration of a cluster waveform for it to be considered noise.",
     )
     min_spat_decay = fields.Float(
         required=False,
         missing=-0.1,
+        allow_none=True,
         description="Minimum spatial decay of a cluster waveform for it to be considered noise.",
-    )
-    max_noise_cutoff = fields.Float(
-        required=False,
-        missing=5,
-        description="Maximum noise cutoff for a cluster, otherwise considered incomplete.",
-    )
-    min_pr = fields.Float(
-        required=False,
-        missing=0.9,
-        description="Minimum presence ratio of a cluster, otherwise considered incomplete.",
     )
     good_lbls = fields.List(
         fields.String,
@@ -120,4 +111,19 @@ class AutoCurateParams(Schema):
         cli_as_single_argument=True,
         missing=["good", "mua", "inc"],
         description="Cluster labels that denote non-noise clusters.",
+    )
+
+
+class PostMergeCurationParams(Schema):
+    max_noise_cutoff = fields.Float(
+        required=False,
+        missing=5,
+        allow_none=True,
+        description="Maximum noise cutoff for a cluster, otherwise considered incomplete.",
+    )
+    min_pr = fields.Float(
+        required=False,
+        missing=0.9,
+        allow_none=True,
+        description="Minimum presence ratio of a cluster, otherwise considered incomplete.",
     )

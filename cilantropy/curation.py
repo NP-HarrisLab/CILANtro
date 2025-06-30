@@ -17,7 +17,7 @@ from cilantropy.custom_metrics import (
     noise_cutoff,
     presence_ratio,
 )
-from cilantropy.params import AutoCurateParams, CuratorParams
+from cilantropy.params import AutoCurateParams, CuratorParams, PostMergeCurationParams
 from cilantropy.rawdata import RawData
 
 
@@ -62,6 +62,7 @@ class Curator(object):
         self.mean_wf: NDArray
         self.channel_pos: NDArray
         self.spikes: NDArray
+        self.params_file: str = os.path.join(self.ks_folder, "cilantro_params.json")
         self._calc_metrics(**kwargs)
 
     @property
@@ -90,6 +91,10 @@ class Curator(object):
     def counts(self) -> NDArray:
         return self.cluster_metrics["num_spikes"].values
 
+    @property
+    def recording_duration_s(self) -> float:
+        return len(self.raw_data.data) / self.params["sample_rate"]
+
     def _load_params(self, **kwargs) -> None:
         params = kwargs
         params["KS_folder"] = self.ks_folder
@@ -108,10 +113,21 @@ class Curator(object):
         params["meta_path"] = params["data_path"].replace(".bin", ".meta")
         params["n_chan"] = params.pop("n_channels_dat")
 
+        params.pop("overwrite")
         self.params = CuratorParams().load(params)
         # in case using old version of marshmallow, convert the struct to dict
         if not isinstance(self.params, dict):
             self.params = self.params._asdict()["data"]
+
+        curation_params = {"curation_params": self.params}
+        curation_params["curation_params"][
+            "base_metrics_date"
+        ] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(
+            self.params_file,
+            "w",
+        ) as f:
+            json.dump(curation_params, f, indent=4)
 
     def _calc_metrics(self, **kwargs) -> None:
         metrics_path = os.path.join(self.ks_folder, "cilantro_metrics.tsv")
@@ -192,9 +208,6 @@ class Curator(object):
             self.cluster_metrics = pd.read_csv(
                 metrics_path, sep="\t", index_col="cluster_id"
             )
-            # will update values if merges happened as needed
-            # TODO: dont update every time
-            self.update_merged_metrics()
         else:
             # TODO do not load in all spikes
             self.spikes = npx.extract_all_spikes(
@@ -315,27 +328,66 @@ class Curator(object):
 
         # SNR
         snr_path = os.path.join(self.ks_folder, "cluster_SNR_good.tsv")
-        tqdm.write("Calculating background standard deviation...")
-        noise = extract_noise(
-            self.raw_data.data,
-            self.spike_times,
-            self.params["pre_samples"],
-            self.params["post_samples"],
-        )
-        meta = npx.read_meta(self.params["meta_path"])
-        noise_stds = cp.std(noise, axis=0) * npx.get_bits_to_uV(meta)
-        snrs = calc_SNR(self.mean_wf, noise_stds, self.cluster_ids)
-        snr_df = pd.DataFrame({"SNR_good": snrs}, index=self.cluster_ids)
-        snr_df.to_csv(
-            snr_path,
-            sep="\t",
-            index=True,
-            index_label="cluster_id",
-        )
-        tqdm.write("SNR file saved.")
-        peak_channels = self.cluster_metrics["peak"].values
-        stds = noise_stds[peak_channels]
-        self.cluster_metrics["noise_stds"] = stds
+        noise_path = os.path.join(self.ks_folder, "noise_stds.tsv")
+        noise_cutoff_path = os.path.join(self.ks_folder, "noise_cutoff.tsv")
+        if overwrite or (
+            not os.path.exists(snr_path)
+            or not os.path.exists(noise_path)
+            or not os.path.exists(noise_cutoff_path)
+        ):
+            tqdm.write("Calculating SNR...")
+            noise = extract_noise(
+                self.raw_data.data,
+                self.spike_times,
+                self.params["pre_samples"],
+                self.params["post_samples"],
+            )
+            meta = npx.read_meta(self.params["meta_path"])
+            noise_stds = cp.std(noise, axis=0) * npx.get_bits_to_uV(meta)
+            snrs = calc_SNR(self.mean_wf, noise_stds, self.cluster_ids)
+            snr_df = pd.DataFrame({"SNR_good": snrs}, index=self.cluster_ids)
+            snr_df.to_csv(
+                snr_path,
+                sep="\t",
+                index=True,
+                index_label="cluster_id",
+            )
+            tqdm.write("SNR file saved.")
+
+            peak_channels = self.cluster_metrics["peak"].values
+            stds = noise_stds[peak_channels]
+            # save noise_stds to csv
+            noise_stds_df = pd.DataFrame({"noise_stds": stds}, index=self.cluster_ids)
+            noise_stds_df.to_csv(
+                noise_path,
+                sep="\t",
+                index=True,
+                index_label="cluster_id",
+            )
+
+            # noise cutoff
+            nc = calculate_noise_cutoff(
+                self.spikes,
+                self.cluster_metrics["peak"].values,
+                self.cluster_ids,
+                self.n_clusters,
+            )
+            # save noise_cutoff to csv
+            noise_cutoff_df = pd.DataFrame({"noise_cutoff": nc}, index=self.cluster_ids)
+            noise_cutoff_df.to_csv(
+                noise_cutoff_path,
+                sep="\t",
+                index=True,
+                index_label="cluster_id",
+            )
+            tqdm.write("Noise cutoff file saved.")
+
+        else:
+            snr_df = pd.read_csv(snr_path, sep="\t", index_col="cluster_id")
+            noise_stds_df = pd.read_csv(noise_path, sep="\t", index_col="cluster_id")
+            noise_cutoff_df = pd.read_csv(
+                noise_cutoff_path, sep="\t", index_col="cluster_id"
+            )
 
         self.cluster_metrics = pd.merge(
             self.cluster_metrics,
@@ -344,27 +396,55 @@ class Curator(object):
             right_index=True,
             how="left",
         )
+        self.cluster_metrics = pd.merge(
+            self.cluster_metrics,
+            noise_stds_df,
+            left_index=True,
+            right_index=True,
+            how="left",
+        )
+        self.cluster_metrics = pd.merge(
+            self.cluster_metrics,
+            noise_cutoff_df,
+            left_index=True,
+            right_index=True,
+            how="left",
+        )
 
         self.cluster_metrics["SNR_good"] = self.cluster_metrics["SNR_good"].astype(
             "float32"
         )
-
-        # noise cutoff
-        nc = calculate_noise_cutoff(
-            self.spikes,
-            self.cluster_metrics["peak"].values,
-            self.cluster_ids,
-            self.n_clusters,
+        self.cluster_metrics["noise_stds"] = self.cluster_metrics["noise_stds"].astype(
+            "float32"
         )
-        self.cluster_metrics["noise_cutoff"] = nc
-
-        # float32
         self.cluster_metrics["noise_cutoff"] = self.cluster_metrics[
             "noise_cutoff"
         ].astype("float32")
 
         # presence ratio
-        calc_presence_ratio(self.cluster_metrics, self.times_multi)
+        presence_ratio_path = os.path.join(self.ks_folder, "presence_ratio.tsv")
+        if overwrite or not os.path.exists(presence_ratio_path):
+            calc_presence_ratio(
+                self.cluster_metrics,
+                self.times_multi,
+                self.recording_duration_s,
+            )
+            pr_df = self.cluster_metrics[["presence_ratio"]]
+            pr_df.to_csv(
+                presence_ratio_path,
+                sep="\t",
+                index=True,
+                index_label="cluster_id",
+            )
+        else:
+            pr_df = pd.read_csv(presence_ratio_path, sep="\t", index_col="cluster_id")
+            self.cluster_metrics = pd.merge(
+                self.cluster_metrics,
+                pr_df,
+                left_index=True,
+                right_index=True,
+                how="left",
+            )
         # float32
         self.cluster_metrics["presence_ratio"] = self.cluster_metrics[
             "presence_ratio"
@@ -381,7 +461,8 @@ class Curator(object):
         except FileNotFoundError:
             tqdm.write("No need to update merge metrics as no merges found.")
             return
-
+        if len(merges) == 0:
+            return
         # update mean_wf, cluster_labels, spike_times that were updated by slay
         self.spike_times = np.load(
             os.path.join(self.ks_folder, "spike_times.npy")
@@ -397,12 +478,13 @@ class Curator(object):
         )
         if "label_reason" not in cluster_labels.columns:
             cluster_labels["label_reason"] = ""
-
+        new_ids = list(merges.keys())
+        n_clusters = max(self.n_clusters, np.max(new_ids) + 1)
         # update times_multi from merges
         self.times_multi = npx.find_times_multi(
             self.spike_times,
             self.spike_clusters,
-            np.arange(self.n_clusters),
+            np.arange(n_clusters),
             self.raw_data.data,
             self.params["pre_samples"],
             self.params["post_samples"],
@@ -445,7 +527,7 @@ class Curator(object):
             _, nc, _ = noise_cutoff(sp_amplitudes)
 
             # presence_ratio
-            pr = presence_ratio(self.times_multi[new_id])
+            pr = presence_ratio(self.times_multi[new_id], self.recording_duration_s)
 
             # firing rate
             fr = np.sum(old_rows["num_spikes"]) / (
@@ -454,8 +536,8 @@ class Curator(object):
 
             new_row = pd.DataFrame(
                 {
-                    "label": cluster_labels.loc[new_id, "label"],
-                    "label_reason": cluster_labels.loc[new_id, "label_reason"],
+                    "label": "good",
+                    "label_reason": f"merged from {old_ids}",
                     "num_spikes": old_rows["num_spikes"].sum(),
                     "firing_rate": fr,
                     "SNR_good": snr,
@@ -473,8 +555,63 @@ class Curator(object):
             self.cluster_metrics.loc[old_ids, "label"] = "merged"
             self.cluster_metrics.loc[old_ids, "label_reason"] = f"merged into {new_id}"
             self.cluster_metrics.loc[old_ids, "num_spikes"] = 0
+        # save new metrics
+        # cluster_SNR_good.tsv
+        cluster_SNR_good = self.cluster_metrics[["SNR_good"]]
+        cluster_SNR_good.to_csv(
+            os.path.join(self.ks_folder, "cluster_SNR_good.tsv"),
+            sep="\t",
+            index=True,
+            index_label="cluster_id",
+        )
+        # cluster_RP_conf.tsv
+        cluster_RP_conf = self.cluster_metrics[["slid_RP_viol"]]
+        cluster_RP_conf.to_csv(
+            os.path.join(self.ks_folder, "cluster_RP_conf.tsv"),
+            sep="\t",
+            index=True,
+            index_label="cluster_id",
+        )
+        # noise_cutoff.tsv
+        nc = self.cluster_metrics[["noise_cutoff"]]
+        nc.to_csv(
+            os.path.join(self.ks_folder, "noise_cutoff.tsv"),
+            sep="\t",
+            index=True,
+            index_label="cluster_id",
+        )
+        # presence_ratio.tsv
+        pr = self.cluster_metrics[["presence_ratio"]]
+        pr.to_csv(
+            os.path.join(self.ks_folder, "presence_ratio.tsv"),
+            sep="\t",
+            index=True,
+            index_label="cluster_id",
+        )
+
+        # cluster_group.tsv
+        cluster_labels = self.cluster_metrics[["label", "label_reason"]]
+        cluster_labels.to_csv(
+            os.path.join(self.ks_folder, "cluster_group.tsv"),
+            sep="\t",
+            index=True,
+            index_label="cluster_id",
+        )
 
     def auto_curate(self, args: dict = {}) -> None:
+        # check if auto_curate_params.json exists and if auto_curate_params are already in it
+        if os.path.exists(self.params_file):
+            with open(self.params_file) as f:
+                auto_curate_params = json.load(f)
+                if "auto_curate_params" in auto_curate_params:
+                    params = auto_curate_params["auto_curate_params"]
+                    if params == args:
+                        tqdm.write("Already auto curated with same params.")
+                        return
+                    else:
+                        tqdm.write("Auto curated with different params previously.")
+                        return
+
         tqdm.write("Auto-curating clusters...")
         schema = AutoCurateParams()
         params = schema.load(args)
@@ -483,89 +620,151 @@ class Curator(object):
         self.cluster_metrics["label_reason"] = ""
 
         # mark low-spike units as noise
-        low_spike_units = self.cluster_metrics[
-            self.cluster_metrics["firing_rate"] < params["min_fr"]
-        ].index
-        self.cluster_metrics.loc[low_spike_units, "label_reason"] = "low firing rate"
-        self.cluster_metrics.loc[low_spike_units, "label"] = "noise"
+        if params["min_fr"] is not None:
+            low_spike_units = self.cluster_metrics[
+                self.cluster_metrics["firing_rate"] < params["min_fr"]
+            ].index
+            self.cluster_metrics.loc[low_spike_units, "label_reason"] = (
+                "low firing rate"
+            )
+            self.cluster_metrics.loc[low_spike_units, "label"] = "noise"
 
         # mark low snr units as noise
-        low_snr_units = self.cluster_metrics[
-            (self.cluster_metrics["SNR_good"] < params["min_snr"])
-            & (self.cluster_metrics["label"].isin(params["good_lbls"]))
-        ].index
-        self.cluster_metrics.loc[low_snr_units, "label_reason"] = "low SNR"
-        self.cluster_metrics.loc[low_snr_units, "label"] = "noise"
+        if params["min_snr"] is not None:
+            low_snr_units = self.cluster_metrics[
+                (self.cluster_metrics["SNR_good"] < params["min_snr"])
+                & (self.cluster_metrics["label"].isin(params["good_lbls"]))
+            ].index
+            self.cluster_metrics.loc[low_snr_units, "label_reason"] = "low SNR"
+            self.cluster_metrics.loc[low_snr_units, "label"] = "noise"
 
         # mark units with high RP violations as mua
-        high_rp_units = self.cluster_metrics[
-            (self.cluster_metrics["slid_RP_viol"] > params["max_rp_viol"])
-            & (self.cluster_metrics["label"].isin(params["good_lbls"]))
-        ].index
-        self.cluster_metrics.loc[high_rp_units, "label_reason"] = "high RP violations"
-        self.cluster_metrics.loc[high_rp_units, "label"] = "mua"
+        if params["max_rp_viol"] is not None:
+            high_rp_units = self.cluster_metrics[
+                (self.cluster_metrics["slid_RP_viol"] > params["max_rp_viol"])
+                & (self.cluster_metrics["label"].isin(params["good_lbls"]))
+            ].index
+            self.cluster_metrics.loc[high_rp_units, "label_reason"] = (
+                "high RP violations"
+            )
+            self.cluster_metrics.loc[high_rp_units, "label"] = "mua"
 
         # mark units with too many peaks and troughs as noise
-        high_peaks_units = self.cluster_metrics[
-            (self.cluster_metrics["n_peaks"] > params["max_peaks"])
-            & (self.cluster_metrics["label"].isin(params["good_lbls"]))
-        ].index
-        self.cluster_metrics.loc[high_peaks_units, "label_reason"] = "too many peaks"
-        self.cluster_metrics.loc[high_peaks_units, "label"] = "noise"
+        if params["max_peaks"] is not None:
+            high_peaks_units = self.cluster_metrics[
+                (self.cluster_metrics["n_peaks"] > params["max_peaks"])
+                & (self.cluster_metrics["label"].isin(params["good_lbls"]))
+            ].index
+            self.cluster_metrics.loc[high_peaks_units, "label_reason"] = (
+                "too many peaks"
+            )
+            self.cluster_metrics.loc[high_peaks_units, "label"] = "noise"
 
-        high_troughs_units = self.cluster_metrics[
-            (self.cluster_metrics["n_troughs"] > params["max_troughs"])
-            & (self.cluster_metrics["label"].isin(params["good_lbls"]))
-        ].index
-        self.cluster_metrics.loc[high_troughs_units, "label_reason"] = (
-            "too many troughs"
-        )
-        self.cluster_metrics.loc[high_troughs_units, "label"] = "noise"
+        if params["max_troughs"] is not None:
+            high_troughs_units = self.cluster_metrics[
+                (self.cluster_metrics["n_troughs"] > params["max_troughs"])
+                & (self.cluster_metrics["label"].isin(params["good_lbls"]))
+            ].index
+            self.cluster_metrics.loc[high_troughs_units, "label_reason"] = (
+                "too many troughs"
+            )
+            self.cluster_metrics.loc[high_troughs_units, "label"] = "noise"
 
         # mark units with long waveform duration as noise
-        long_wf_units = self.cluster_metrics[
-            (self.cluster_metrics["wf_dur"] > params["max_wf_dur"])
-            & (self.cluster_metrics["label"].isin(params["good_lbls"]))
-        ].index
-        self.cluster_metrics.loc[long_wf_units, "label_reason"] = "long waveform"
-        self.cluster_metrics.loc[long_wf_units, "label"] = "noise"
+        if params["max_wf_dur"] is not None:
+            long_wf_units = self.cluster_metrics[
+                (self.cluster_metrics["wf_dur"] > params["max_wf_dur"])
+                & (self.cluster_metrics["label"].isin(params["good_lbls"]))
+            ].index
+            self.cluster_metrics.loc[long_wf_units, "label_reason"] = "long waveform"
+            self.cluster_metrics.loc[long_wf_units, "label"] = "noise"
 
         # mark units with low spatial decay as noise
-        low_spat_decay_units = self.cluster_metrics[
-            (self.cluster_metrics["spat_decay"] < params["min_spat_decay"])
-            & (self.cluster_metrics["label"].isin(params["good_lbls"]))
-        ].index
-        self.cluster_metrics.loc[low_spat_decay_units, "label_reason"] = (
-            "low spatial decay"
-        )
-        self.cluster_metrics.loc[low_spat_decay_units, "label"] = "noise"
+        if params["min_spat_decay"] is not None:
+            low_spat_decay_units = self.cluster_metrics[
+                (self.cluster_metrics["spat_decay"] < params["min_spat_decay"])
+                & (self.cluster_metrics["label"].isin(params["good_lbls"]))
+            ].index
+            self.cluster_metrics.loc[low_spat_decay_units, "label_reason"] = (
+                "low spatial decay"
+            )
+            self.cluster_metrics.loc[low_spat_decay_units, "label"] = "noise"
 
         self.save_labels()
+        # save log of parameters used
+        if os.path.exists(self.params_file):
+            try:
+                with open(self.params_file) as f:
+                    existing_data = json.load(f)
+            except json.JSONDecodeError:
+                existing_data = {}
+        else:
+            existing_data = {}
+        params["curation_date"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+        existing_data.update({"auto_curate_params": params})
+        with open(
+            self.params_file,
+            "w",
+        ) as f:
+            json.dump(existing_data, f, indent=4)
 
     def post_merge_curation(self, args: dict = {}) -> None:
+        if os.path.exists(self.params_file):
+            with open(self.params_file) as f:
+                auto_curate_params = json.load(f)
+                if "post_merge_params" in auto_curate_params:
+                    params = auto_curate_params["post_merge_params"]
+                    if params == args:
+                        tqdm.write("Already post-merge curated with same params.")
+                        return
+                    else:
+                        tqdm.write(
+                            "Post-merge curated with different params previously."
+                        )
+                        return
         tqdm.write("Post-merge curation...")
-        schema = AutoCurateParams()
+        schema = PostMergeCurationParams()
         params = schema.load(args)
 
         self.update_merged_metrics()
 
-        high_amp_units = self.cluster_metrics[
-            (self.cluster_metrics["noise_cutoff"] > params["max_noise_cutoff"])
-            & (self.cluster_metrics["label"] == "good")
-        ].index
-        self.cluster_metrics.loc[high_amp_units, "label_reason"] = (
-            "high amplitude cutoff"
-        )
-        self.cluster_metrics.loc[high_amp_units, "label"] = "inc"
+        if params["max_noise_cutoff"] is not None:
+            high_amp_units = self.cluster_metrics[
+                (self.cluster_metrics["noise_cutoff"] > params["max_noise_cutoff"])
+                & (self.cluster_metrics["label"] == "good")
+            ].index
+            self.cluster_metrics.loc[high_amp_units, "label_reason"] = (
+                "high amplitude cutoff"
+            )
+            self.cluster_metrics.loc[high_amp_units, "label"] = "inc"
 
-        low_pr_units = self.cluster_metrics[
-            (self.cluster_metrics["presence_ratio"] < params["min_pr"])
-            & (self.cluster_metrics["label"] == "good")
-        ].index
-        self.cluster_metrics.loc[low_pr_units, "label_reason"] = "low presence ratio"
-        self.cluster_metrics.loc[low_pr_units, "label"] = "inc"
+        if params["min_pr"] is not None:
+            low_pr_units = self.cluster_metrics[
+                (self.cluster_metrics["presence_ratio"] < params["min_pr"])
+                & (self.cluster_metrics["label"] == "good")
+            ].index
+            self.cluster_metrics.loc[low_pr_units, "label_reason"] = (
+                "low presence ratio"
+            )
+            self.cluster_metrics.loc[low_pr_units, "label"] = "inc"
 
         self.save_labels()
+        if os.path.exists(self.params_file):
+            try:
+                with open(self.params_file) as f:
+                    existing_data = json.load(f)
+            except json.JSONDecodeError:
+                existing_data = {}
+        else:
+            existing_data = {}
+        # add date to params
+        params["merge_date"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+        existing_data.update({"post_merge_params": params})
+        with open(
+            self.params_file,
+            "w",
+        ) as f:
+            json.dump(existing_data, f, indent=4)
 
     def save_labels(self) -> None:
         # save new cluster_group.tsv
@@ -583,7 +782,7 @@ class Curator(object):
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
-    def close(self):
+    def save(self):
         tqdm.write("Saving cluster metrics to cilantro_metrics.tsv...")
         # save cluster_metrics in cilantro_metrics.tsv
         self.cluster_metrics.to_csv(
@@ -594,3 +793,6 @@ class Curator(object):
         )
 
         self.raw_data.close()
+
+    def close(self):
+        self.save()

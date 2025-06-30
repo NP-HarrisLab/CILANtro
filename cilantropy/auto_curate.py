@@ -146,11 +146,11 @@ def run_custom_metrics(ks_folder, args):
 if __name__ == "__main__":
     # SET PARAMETERS ############################################
     params = {
-        "folder": r"D:\Psilocybin\Cohort_2",
+        "folder": r"D:\Psilocybin\Cohort_2b\T17\20250603_T17_day10",
         "ks_ver": "4",
         "ecephys_params": {
             "overwrite": False,
-            "run_CatGT": True,  # leave to True if you want to run processing on sorted catgt files
+            "run_CatGT": True,
             "process_lf": True,
             "ni_present": False,
             # "ni_extract_string": "-xa=0,0,0,1,1,0 -xa=0,0,1,1,1,10 -xa=0,0,2,1,1,500 -xa=0,0,3,1,1,500",
@@ -162,18 +162,26 @@ if __name__ == "__main__":
             "run_quality_metrics": False,
             "maxsecs": 15 * 60,  # 15 minutes
         },
-        "curator_params": {"overwrite": False},  # default
-        "run_auto_curate": False,
-        "auto_curate_params": {},  # default
-        "run_merge": False,
+        "curator_params": {"overwrite": False},
+        "run_auto_curate": True,
+        "auto_curate_params": {
+            "min_fr": 0.1,
+            "min_sr": 3,
+            "max_rp_viol": 0.1,
+            "max_peaks": None,
+            "max_troughs": None,
+            "max_wf_dur": None,
+            "min_spat_decay": None,
+        },
+        "run_merge": True,
         "merge_params": {
             "overwrite": False,
             "plot_merges": False,
             "max_spikes": 500,
-            "auto_accept_merges": False,
+            "auto_accept_merges": True,
         },  # default
-        "run_post_merge_curation": False,
-        "post_merge_curation_params": {},
+        "run_post_merge_curation": True,
+        "post_merge_curation_params": {"max_noise_cutoff": 5, "min_pr": 0.9},
         "delete": False,
     }
     processing_drive = "D:"
@@ -204,34 +212,41 @@ if __name__ == "__main__":
         if not any(processes):
             tqdm.write(f"Nothing to process for {info['run_name']}")
             continue
-        # copy over to D: and process
-        probe_folders = [
-            os.path.join(
-                info["npx_directory"],
-                f"{info['run_name']}_g{info['gate_index']}",
-                f"{info['run_name']}_g{info['gate_index']}_imec{probe_id}",
-            )
-            for probe_id in info["probes"].split(",")
-        ]
-        catgt_probe_folders = [
-            os.path.join(
-                info["npx_directory"],
-                f"catgt_{info['run_name']}_g{info['gate_index']}",
-                f"{info['run_name']}_g{info['gate_index']}_imec{probe_id}",
-            )
-            for probe_id in info["probes"].split(",")
-        ]
-        # if os.path.exists(probe_folders[0]):
-        #     # check if already processed
-        #     mod_time = datetime.fromtimestamp(os.path.getmtime(probe_folders[0]))
-        #     if mod_time >= datetime(2025, 4, 1):
-        #         continue
-        copy_folders = probe_folders if info["run_CatGT"] else catgt_probe_folders
-        for probe_folder in copy_folders:
-            probe_id = int(probe_folder.split("imec")[-1])
+        # check if running catgt
+        if info["run_CatGT"]:
+            # copy over data to processing drive if needed]
             if orig_drive != processing_drive:
-                new_probe_folder = probe_folder.replace(orig_drive, processing_drive)
-                copy_folder_with_progress(probe_folder, new_probe_folder)
+                copy_folder_with_progress(
+                    info["npx_directory"],
+                    info["npx_directory"].replace(orig_drive, processing_drive),
+                )
+        # # copy over to D: and process
+        # probe_folders = [
+        #     os.path.join(
+        #         info["npx_directory"],
+        #         f"{info['run_name']}_g{info['gate_index']}",
+        #         f"{info['run_name']}_g{info['gate_index']}_imec{probe_id}",
+        #     )
+        #     for probe_id in info["probes"].split(",")
+        # ]
+        # catgt_probe_folders = [
+        #     os.path.join(
+        #         info["npx_directory"],
+        #         f"catgt_{info['run_name']}_g{info['gate_index']}",
+        #         f"{info['run_name']}_g{info['gate_index']}_imec{probe_id}",
+        #     )
+        #     for probe_id in info["probes"].split(",")
+        # ]
+        # # if os.path.exists(probe_folders[0]):
+        # #     # check if already processed
+        # #     mod_time = datetime.fromtimestamp(os.path.getmtime(probe_folders[0]))
+        # #     if mod_time >= datetime(2025, 4, 1):
+        # #         continue
+        # if orig_drive != processing_drive:
+        #     copy_folders = probe_folders if info["run_CatGT"] else catgt_probe_folders
+        #     for probe_folder in copy_folders:
+        #         new_probe_folder = probe_folder.replace(orig_drive, processing_drive)
+        #         copy_folder_with_progress(probe_folder, new_probe_folder)
 
         info["npx_directory"] = info["npx_directory"].replace(
             orig_drive, processing_drive
@@ -246,7 +261,9 @@ if __name__ == "__main__":
         )
         catgt_folder_proc = catgt_folder.replace(orig_drive, processing_drive)
         # copy over catgt folder
-        if info["run_CatGT"] or not os.path.exists(catgt_folder):
+        if (orig_drive != processing_drive) and (
+            info["run_CatGT"] or not os.path.exists(catgt_folder)
+        ):
             copy_folder_with_progress(catgt_folder_proc, catgt_folder, overwrite=True)
 
         for probe_folder in catgt_probe_folders:
@@ -256,18 +273,22 @@ if __name__ == "__main__":
             )
             ks_folder_proc = ks_folder_orig.replace(orig_drive, processing_drive)
 
-            if info["run_kilosort"] and info["run_kilosort_postprocessing"]:
-                copy_folder_with_progress(
-                    ks_folder_proc, f"{ks_folder_proc}_jc", overwrite=True
-                )
-                copy_folder_with_progress(
-                    ks_folder_proc + "_jc", ks_folder_orig + "_jc", overwrite=True
-                )
-            elif info["run_kilosort"] and not os.path.exists(ks_folder_proc + "_orig"):
+            if (
+                info["run_kilosort"]
+                and not info["run_kilosort_postprocessing"]
+                and not os.path.exists(ks_folder_proc + "_orig")
+            ):
                 copy_folder_with_progress(ks_folder_proc, ks_folder_proc + "_orig")
                 copy_folder_with_progress(ks_folder_proc, ks_folder_orig + "_orig")
 
             with Curator(ks_folder_proc, **params["curator_params"]) as curator:
+                if info["run_kilosort"] and info["run_kilosort_postprocessing"]:
+                    copy_folder_with_progress(
+                        ks_folder_proc, f"{ks_folder_proc}_jc", overwrite=True
+                    )
+                    copy_folder_with_progress(
+                        ks_folder_proc + "_jc", ks_folder_orig + "_jc", overwrite=True
+                    )
                 if params["run_auto_curate"]:
                     curator.auto_curate(params["auto_curate_params"])
                 if params["run_merge"]:
