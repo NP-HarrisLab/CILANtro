@@ -35,7 +35,7 @@ def extract_noise(data, times, pre_samples, post_samples, max_snippets=-1):
 
     # Get min between max_snippets and available memory
     snippet_size_bytes = data.shape[1] * np.dtype(data.dtype).itemsize
-    available_memory = cp.cuda.runtime.memGetInfo()[0] * 0.7  # add buffer
+    available_memory = cp.cuda.runtime.memGetInfo()[0] * 0.1  # add buffer
     max_snippets_by_memory = int(available_memory / snippet_size_bytes)
     if max_snippets == -1:
         max_snippets = max_snippets_by_memory
@@ -296,25 +296,29 @@ def noise_cutoff(
     return nc_pass, cutoff, first_low_quantile
 
 
-def calc_presence_ratio(cluster_metrics, times_multi, num_bins=100):
+def calc_presence_ratio(
+    cluster_metrics, times_multi, recording_duration_s, bin_size_s=20
+):
     # adapted from https://github.com/AllenInstitute/ecephys_spike_sorting/blob/archive/ecephys_spike_sorting/modules/quality_metrics/metrics.py
     # add column for presence ratio if it doesn't exist
     if "presence_ratio" not in cluster_metrics.columns:
         cluster_metrics["presence_ratio"] = pd.NA
 
+    # calculate number of bins
     for cluster in tqdm(cluster_metrics.index, desc="Calculating presence ratios"):
         if pd.isna(cluster_metrics.loc[cluster, "presence_ratio"]):
             spike_times = times_multi[cluster]
-            pr = presence_ratio(spike_times, num_bins)
+            pr = presence_ratio(spike_times, recording_duration_s, bin_size_s)
             cluster_metrics.loc[cluster, "presence_ratio"] = pr
     return cluster_metrics
 
 
-def presence_ratio(spike_times, num_bins=100):
+def presence_ratio(spike_times, recording_duration_s, bin_size_s=20):
+    num_bins = int(recording_duration_s / bin_size_s)
     if not np.all(np.isnan(spike_times)) and len(spike_times) > 0:
-        min_time = np.min(spike_times)
-        max_time = np.max(spike_times)
-        hist, _ = np.histogram(spike_times, np.linspace(min_time, max_time, num_bins))
+        hist, _ = np.histogram(
+            spike_times, np.linspace(0, recording_duration_s * 1000, num_bins)
+        )
         pr = np.sum(hist > 0) / num_bins
         return pr
     return np.nan
