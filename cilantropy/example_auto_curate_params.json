@@ -1,0 +1,44 @@
+{
+    "folders": [
+        "D:\\Psilocybin\\Cohort_3\\T21\\20250730_T21_acute"
+    ],
+    "ks_ver": "4",
+    "ecephys_params": {
+        "overwrite": false,
+        "run_CatGT": true,
+        "process_lf": true,
+        "ni_extract_string": "-xd=0,0,8,2,0 -xd=0,0,8,1,500",
+        "run_kilosort": true,
+        "run_kilosort_postprocessing": true,
+        "run_noise_templates": false,
+        "run_mean_waveforms": false,
+        "run_quality_metrics": false
+    },
+    "run_supercat": true,
+    "supercat_params": {},
+    "curator_params": {},
+    "run_auto_curate": true,
+    "reset_auto_curate": false,
+    "auto_curate_params": {
+        "min_fr": 0.1,
+        "min_snr": 2,
+        "max_rp_viol": 0.1,
+        "max_peaks": null,
+        "max_troughs": null,
+        "max_wf_dur": null,
+        "min_spat_decay": null
+    },
+    "run_merge": true,
+    "merge_params": {
+        "overwrite": false,
+        "plot_merges": false,
+        "max_spikes": 500,
+        "auto_accept_merges": true
+    },
+    "run_post_merge_curation": true,
+    "post_merge_curation_params": {
+        "max_noise_cutoff": 5,
+        "min_pr": 0.9
+    },
+    "delete": false
+}
