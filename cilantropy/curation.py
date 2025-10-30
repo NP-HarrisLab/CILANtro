@@ -61,9 +61,23 @@ class Curator(object):
         self.cluster_metrics: pd.DataFrame
         self.mean_wf: NDArray
         self.channel_pos: NDArray
-        self.spikes: NDArray
+        self._spikes = None
         self.params_file: str = os.path.join(self.ks_folder, "cilantro_params.json")
         self._calc_metrics(**kwargs)
+
+    @property
+    def spikes(self) -> NDArray:
+        if self._spikes is None:
+            # extract spikes
+            self._spikes = npx.extract_all_spikes(
+                self.raw_data.data,
+                self.times_multi,
+                self.cluster_ids,
+                self.params["pre_samples"],
+                self.params["post_samples"],
+                self.params["max_spikes"],
+            )
+        return self._spikes
 
     @property
     def n_clusters(self) -> int:
@@ -84,8 +98,10 @@ class Curator(object):
         return self.cluster_metrics["peak"].values
 
     @property
-    def good_clusters(self) -> NDArray[np.bool_]:
-        return self.cluster_metrics["label"].values == "good"
+    def good_units(self) -> NDArray[np.int_]:
+        return self.cluster_metrics[
+            self.cluster_metrics["label"].values == "good"
+        ].index
 
     @property
     def counts(self) -> NDArray:
@@ -94,6 +110,10 @@ class Curator(object):
     @property
     def recording_duration_s(self) -> float:
         return len(self.raw_data.data) / self.params["sample_rate"]
+
+    @property
+    def sample_rate(self) -> float:
+        return self.params["sample_rate"]
 
     def _load_params(self, **kwargs) -> None:
         params = kwargs
@@ -113,7 +133,9 @@ class Curator(object):
         params["meta_path"] = params["data_path"].replace(".bin", ".meta")
         params["n_chan"] = params.pop("n_channels_dat")
 
-        params.pop("overwrite")
+        if params.get("overwrite"):
+            params.pop("overwrite")
+
         self.params = CuratorParams().load(params)
         # in case using old version of marshmallow, convert the struct to dict
         if not isinstance(self.params, dict):
@@ -173,10 +195,11 @@ class Curator(object):
         cluster_ids = np.unique(self.spike_clusters, return_counts=False)
         n_clusters = np.max(cluster_ids) + 1
 
+        cluster_ids = np.arange(n_clusters)
         self.times_multi = npx.find_times_multi(
             self.spike_times,
             self.spike_clusters,
-            np.arange(n_clusters),
+            cluster_ids,
             self.raw_data.data,
             self.params["pre_samples"],
             self.params["post_samples"],
@@ -185,12 +208,14 @@ class Curator(object):
             i for i in cluster_ids if len(self.times_multi[i]) > 0
         ]  # fix cluster ids if no spikes in bounds
 
+        # TODO can still optimize
         self.mean_wf = npx.calc_mean_wf(
             self.params,
             n_clusters,
             cluster_ids,
             self.times_multi,
             self.raw_data.data,
+            self._spikes,
         )
 
         # calculate mean waveform for tracking
@@ -201,6 +226,7 @@ class Curator(object):
             self.times_multi,
             self.raw_data.data,
             n_splits=2,
+            all_spikes=self._spikes,
         )
 
         # load cilantro_metrics.tsv if it exists
@@ -209,15 +235,6 @@ class Curator(object):
                 metrics_path, sep="\t", index_col="cluster_id"
             )
         else:
-            # TODO do not load in all spikes
-            self.spikes = npx.extract_all_spikes(
-                self.raw_data.data,
-                self.times_multi,
-                cluster_ids,
-                self.params["pre_samples"],
-                self.params["post_samples"],
-                self.params["max_spikes"],
-            )
             self.create_dataframe(overwrite=kwargs.get("overwrite", False))
 
     def create_dataframe(self, overwrite) -> None:
@@ -343,7 +360,12 @@ class Curator(object):
                 self.params["post_samples"],
             )
             meta = npx.read_meta(self.params["meta_path"])
-            noise_stds = cp.std(noise, axis=0) * npx.get_bits_to_uV(meta)
+            nAP = npx.get_channel_counts(meta)[0]
+            bits_to_uV = npx.get_bits_to_uV(np.arange(nAP), meta)
+            bits_to_uV = np.append(bits_to_uV, 1)  # add 1 for sync channel
+            noise_stds = (
+                cp.std(noise, axis=0) * bits_to_uV
+            )  # convert to uV b/c mean wf is in uV
             snrs = calc_SNR(self.mean_wf, noise_stds, self.cluster_ids)
             snr_df = pd.DataFrame({"SNR_good": snrs}, index=self.cluster_ids)
             snr_df.to_csv(
@@ -489,16 +511,8 @@ class Curator(object):
             self.params["pre_samples"],
             self.params["post_samples"],
         )
-        cluster_ids = [k for k, v in self.times_multi.items() if len(v) > 0]
-        # Reload spikes. TODO: do not load for all of recording
-        self.spikes = npx.extract_all_spikes(
-            self.raw_data.data,
-            self.times_multi,
-            cluster_ids,
-            self.params["pre_samples"],
-            self.params["post_samples"],
-            self.params["max_spikes"],
-        )
+        # cluster_ids = [k for k, v in self.times_multi.items() if len(v) > 0]
+
         for new_id, old_ids in merges.items():
             if new_id in self.cluster_metrics.index:
                 continue
@@ -522,7 +536,17 @@ class Curator(object):
             # slid_RP_viol
             slid_rp_viol = npx.calc_sliding_RP_viol(self.times_multi, [new_id])[new_id]
 
-            # noise_cutoff
+            if new_id not in self.spikes:
+                new_spikes = npx.extract_all_spikes(
+                    self.raw_data.data,
+                    self.times_multi,
+                    [new_id],
+                    self.params["pre_samples"],
+                    self.params["post_samples"],
+                    self.params["max_spikes"],
+                )
+                self._spikes[new_id] = new_spikes[new_id]
+
             sp_amplitudes = np.ptp(self.spikes[new_id], 1)
             _, nc, _ = noise_cutoff(sp_amplitudes)
 
@@ -555,6 +579,9 @@ class Curator(object):
             self.cluster_metrics.loc[old_ids, "label"] = "merged"
             self.cluster_metrics.loc[old_ids, "label_reason"] = f"merged into {new_id}"
             self.cluster_metrics.loc[old_ids, "num_spikes"] = 0
+            for old_id in old_ids:
+                if old_id in self._spikes:
+                    self._spikes[old_id] = np.array([])
         # save new metrics
         # cluster_SNR_good.tsv
         cluster_SNR_good = self.cluster_metrics[["SNR_good"]]

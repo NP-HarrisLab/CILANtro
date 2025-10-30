@@ -2,3 +2,7 @@
 .vscode/
 __pycache__/
 *.egg-info/
+*.log
+logs/
+auto_curate_params.json
+run_catgt.py
