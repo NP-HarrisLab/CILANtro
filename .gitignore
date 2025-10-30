@@ -5,3 +5,4 @@ __pycache__/
 *.log
 logs/
 auto_curate_params.json
+run_catgt.py

@@ -195,10 +195,11 @@ class Curator(object):
         cluster_ids = np.unique(self.spike_clusters, return_counts=False)
         n_clusters = np.max(cluster_ids) + 1
 
+        cluster_ids = np.arange(n_clusters)
         self.times_multi = npx.find_times_multi(
             self.spike_times,
             self.spike_clusters,
-            np.arange(n_clusters),
+            cluster_ids,
             self.raw_data.data,
             self.params["pre_samples"],
             self.params["post_samples"],
@@ -234,15 +235,6 @@ class Curator(object):
                 metrics_path, sep="\t", index_col="cluster_id"
             )
         else:
-            # # TODO do not load in all spikes
-            # self.spikes = npx.extract_all_spikes(
-            #     self.raw_data.data,
-            #     self.times_multi,
-            #     cluster_ids,
-            #     self.params["pre_samples"],
-            #     self.params["post_samples"],
-            #     self.params["max_spikes"],
-            # )
             self.create_dataframe(overwrite=kwargs.get("overwrite", False))
 
     def create_dataframe(self, overwrite) -> None:
@@ -545,7 +537,7 @@ class Curator(object):
             slid_rp_viol = npx.calc_sliding_RP_viol(self.times_multi, [new_id])[new_id]
 
             if new_id not in self.spikes:
-                self._spikes[new_id] = npx.extract_all_spikes(
+                new_spikes = npx.extract_all_spikes(
                     self.raw_data.data,
                     self.times_multi,
                     [new_id],
@@ -553,9 +545,7 @@ class Curator(object):
                     self.params["post_samples"],
                     self.params["max_spikes"],
                 )
-                for old_id in old_ids:
-                    if old_id in self._spikes:
-                        self._spikes[old_id] = np.array([])
+                self._spikes[new_id] = new_spikes[new_id]
 
             sp_amplitudes = np.ptp(self.spikes[new_id], 1)
             _, nc, _ = noise_cutoff(sp_amplitudes)
@@ -589,6 +579,9 @@ class Curator(object):
             self.cluster_metrics.loc[old_ids, "label"] = "merged"
             self.cluster_metrics.loc[old_ids, "label_reason"] = f"merged into {new_id}"
             self.cluster_metrics.loc[old_ids, "num_spikes"] = 0
+            for old_id in old_ids:
+                if old_id in self._spikes:
+                    self._spikes[old_id] = np.array([])
         # save new metrics
         # cluster_SNR_good.tsv
         cluster_SNR_good = self.cluster_metrics[["SNR_good"]]

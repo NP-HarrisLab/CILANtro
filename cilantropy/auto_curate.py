@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 from datetime import datetime
+from pathlib import Path
 
 import npx_utils as npx
 import numpy as np
@@ -39,12 +40,7 @@ def get_probe_id(probe_folder):
 
 
 def get_processing_needs(folder, params, ks_ver):
-    probe_folders = [
-        os.path.join(folder, name)
-        for name in os.listdir(folder)
-        if os.path.isdir(os.path.join(folder, name))
-    ]
-
+    probe_folders = list(Path(folder).glob("*imec[0-9]"))
     probe_ids = [get_probe_id(probe_folder) for probe_folder in probe_folders]
 
     name = os.path.basename(probe_folders[0])
@@ -272,7 +268,7 @@ def get_run_info(folder, ks_ver, params, supercat_params=None):
 def get_startsecs(info):
     # ensure ni_present
     supercat = info.get("supercat", False)
-    if not info["ni_present"] or supercat:
+    if not info["ni_present"] or supercat or info["trim_to_ni_start"]:
         return 0
     json_path = importlib.resources.files("ecephys_spike_sorting.scripts").joinpath(
         "create_input_json_params.json"
@@ -316,25 +312,33 @@ def get_startsecs(info):
 
 
 def get_extra_catgt_params(info):
-    filename = info["npx_directory"].lower()
+    filename = info["run_name"].lower()
     startsecs = get_startsecs(info)
-    # behaviors
-    if "ymaze" in filename or "y_maze" in filename:
-        maxsecs = 10 * 60
-    elif "of" in filename or "openfield" in filename or "open_field" in filename:
-        maxsecs = 15 * 60
-    elif "sit" in filename:
-        maxsecs = 10 * 60
-    # acute drug day
-    elif "acute_drug" in filename or "acute_post" in filename:
-        maxsecs = 60 * 60
+    if info.get("run_supercat", False):
+        maxsecs = None
     else:
-        maxsecs = 15 * 60
+        # behaviors
+        if "ymaze" in filename or "y_maze" in filename:
+            maxsecs = 10 * 60
+        elif "of" in filename or "openfield" in filename or "open_field" in filename:
+            maxsecs = 15 * 60
+        elif "sit" in filename:
+            maxsecs = 10 * 60
+        # acute drug day
+        elif "acute_drug" in filename or "acute_post" in filename:
+            maxsecs = 60 * 60
+        else:
+            maxsecs = 15 * 60
     trim_edges = maxsecs == None
     return maxsecs, trim_edges, startsecs
 
 
 if __name__ == "__main__":
+    # Setup auto_curate_params.json with desired params, can copy from example_auto_curate_params.json
+    # setup get_extra_catgt_params with any logic you want. check to make sure it is good
+    # if trim_to_ni_start == True, then uses first ni extract to find start
+    # set processing drive if data exists on another drive
+
     setup_logging()
     # SET PARAMETERS ############################################
     with open(os.path.join(os.path.dirname(__file__), "auto_curate_params.json")) as f:
@@ -367,7 +371,7 @@ if __name__ == "__main__":
                 params["run_post_merge_curation"],
             ]
             (
-                info["max_secs"],
+                info["maxsecs"],
                 params["supercat_params"]["trim_edges"],
                 info["startsecs"],
             ) = get_extra_catgt_params(info)

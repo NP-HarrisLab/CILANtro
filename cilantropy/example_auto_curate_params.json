@@ -12,7 +12,8 @@
         "run_kilosort_postprocessing": true,
         "run_noise_templates": false,
         "run_mean_waveforms": false,
-        "run_quality_metrics": false
+        "run_quality_metrics": false,
+        "trim_to_ni_start": false
     },
     "run_supercat": true,
     "supercat_params": {},
