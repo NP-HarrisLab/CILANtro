@@ -76,7 +76,7 @@ class AutoCurateParams(Schema):
     )
     min_snr = fields.Float(
         required=False,
-        missing=3.0,
+        missing=2.0,
         description="Minimum SNR for a cluster to undergo further stages.",
     )
     max_rp_viol = fields.Float(

@@ -5,6 +5,7 @@ from datetime import datetime
 
 import slay
 from ecephys_spike_sorting import sglx_pipeline
+from ecephys_spike_sorting import sglx_nxt_pipeline
 from npx_utils import copy_folder_with_progress, get_ks_folders, is_run_folder
 from tqdm import tqdm
 
@@ -146,26 +147,27 @@ def run_custom_metrics(ks_folder, args):
 if __name__ == "__main__":
     # SET PARAMETERS ############################################
     params = {
-        "folder": r"D:\Psilocybin\Cohort_2",
+        "folder": r"D:\recording_data\20250721_Martin_4p_ymaze_run6_g0",
         "ks_ver": "4",
         "ecephys_params": {
-            "overwrite": False,
+            "overwrite": True,
             "run_CatGT": True,  # leave to True if you want to run processing on sorted catgt files
-            "process_lf": True,
+            "process_lf": False,
             "ni_present": False,
-            # "ni_extract_string": "-xa=0,0,0,1,1,0 -xa=0,0,1,1,1,10 -xa=0,0,2,1,1,500 -xa=0,0,3,1,1,500",
-            "runTPrime": False,
-            "run_kilosort": True,
-            "run_kilosort_postprocessing": True,
+            #"ni_extract_string": "-xa=0,0,0,1,1,0 -xa=0,0,1,1,1,10 -xa=0,0,2,1,1,500 -xa=0,0,3,1,1,500",S
+            "ni_extract_string": "-xd=0,0,8,0,500, -xd=0,0,8,2,10, -xd=0,0,8,2,0",
+            "runTPrime": True, ##
+            "run_kilosort": True, ##
+            "run_kilosort_postprocessing": True, ##
             "run_noise_templates": False,
             "run_mean_waveforms": False,
             "run_quality_metrics": False,
             "maxsecs": 15 * 60,  # 15 minutes
         },
         "curator_params": {"overwrite": False},  # default
-        "run_auto_curate": False,
+        "run_auto_curate": True, ##
         "auto_curate_params": {},  # default
-        "run_merge": False,
+        "run_merge": True, ##
         "merge_params": {
             "overwrite": False,
             "plot_merges": False,
@@ -176,6 +178,7 @@ if __name__ == "__main__":
         "post_merge_curation_params": {},
         "delete": False,
     }
+
     processing_drive = "D:"
     orig_drive = params["folder"].split(os.sep)[0]
     ############################################################
@@ -238,7 +241,9 @@ if __name__ == "__main__":
         )
 
         # run ecephys pipeline
+
         sglx_pipeline.main(info)  # multi-run pipeline
+
 
         catgt_folder = os.path.join(
             info["npx_directory"].replace(processing_drive, orig_drive),
